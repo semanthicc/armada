@@ -1,4 +1,5 @@
-import type { Plugin, PluginInput } from '@opencode-ai/plugin';
+import type { Plugin, PluginInput, Hooks } from '@opencode-ai/plugin';
+import type { Part, UserMessage } from '@opencode-ai/sdk';
 import { tool } from '@opencode-ai/plugin';
 import { existsSync, readdirSync, readFileSync, writeFileSync, unlinkSync, mkdirSync, renameSync } from 'fs';
 import { join, basename } from 'path';
@@ -189,46 +190,68 @@ const DISTINCTION_RULE = `
 </system-rule>
 `;
 
-export const WorkflowsPlugin: Plugin = async ({ directory }: PluginInput) => {
+export const WorkflowsPlugin: Plugin = async (ctx: PluginInput) => {
+  const { directory } = ctx;
   let workflows = loadWorkflows(directory);
 
   const workflowNames = [...workflows.keys()].join(', ') || '(none)';
   console.log(`Workflows: ${workflows.size} available [${workflowNames}]`);
 
   return {
-    "chat.params": async (params: Record<string, unknown>) => {
+    // Inject DISTINCTION_RULE into system prompt
+    "experimental.chat.system.transform": async (
+      _input: Record<string, never>,
+      output: { system: string[] }
+    ) => {
+      const hasRule = output.system.some(s => s.includes("DISTINCTION RULE"));
+      if (!hasRule) {
+        output.system.push(DISTINCTION_RULE);
+      }
+    },
+
+    // Transform user message parts to expand //workflow mentions
+    "chat.message": async (
+      _input: {
+        sessionID: string;
+        agent?: string;
+        model?: { providerID: string; modelID: string };
+        messageID?: string;
+      },
+      output: {
+        message: UserMessage;
+        parts: Part[];
+      }
+    ) => {
       try {
         workflows = loadWorkflows(directory);
 
-        const input = params.input as Record<string, unknown> | undefined;
-        const message = input?.message as Record<string, unknown> | undefined;
-        const userMessage = message?.text as string | undefined;
+        for (const part of output.parts) {
+          if (part.type === "text" && "text" in part) {
+            const textPart = part as { type: "text"; text: string };
+            const mentions = detectWorkflowMentions(textPart.text);
+            
+            if (mentions.length === 0) continue;
 
-        if (!userMessage || !message) return;
+            const { expanded, found, notFound, suggestions } = expandWorkflowMentions(
+              textPart.text,
+              workflows
+            );
 
-        const systemPrompt = input?.systemPrompt as string | undefined;
-        if (systemPrompt && input) {
-           if (!systemPrompt.includes("DISTINCTION RULE")) {
-             input.systemPrompt = `${systemPrompt}\n\n${DISTINCTION_RULE}`;
-           }
-        }
+            if (found.length === 0 && notFound.length === 0) continue;
 
-        const mentions = detectWorkflowMentions(userMessage);
-        if (mentions.length === 0) return;
+            const workflowContext = buildWorkflowContext(found, notFound, suggestions);
 
-        const { expanded, found, notFound, suggestions } = expandWorkflowMentions(userMessage, workflows);
+            if (found.length === 0) {
+              textPart.text = `${textPart.text}\n\n${workflowContext}`;
+            } else {
+              textPart.text = expanded + workflowContext;
+            }
 
-        if (found.length === 0 && notFound.length === 0) return;
-
-        const workflowContext = buildWorkflowContext(found, notFound, suggestions);
-        
-        if (found.length === 0) {
-             message.text = `${userMessage}\n\n${workflowContext}`;
-        } else {
-             message.text = expanded + workflowContext;
+            console.log(`[opencode-workflows] Expanded ${found.length} workflow(s): ${found.join(', ')}`);
+          }
         }
       } catch (error) {
-        console.error("[opencode-workflows] Error in chat.params hook", error);
+        console.error("[opencode-workflows] Error in chat.message hook", error);
       }
     },
 
