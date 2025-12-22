@@ -33,9 +33,26 @@ export function findAllMatches(typo: string, candidates: string[], limit = 3): s
 export interface WorkflowMention {
   name: string;
   force: boolean;
+  args: Record<string, string>;
 }
 
-const WORKFLOW_MENTION_PATTERN = /(?<![:\w/])\/\/([a-zA-Z0-9][a-zA-Z0-9_-]*)(!)?/g;
+const WORKFLOW_MENTION_PATTERN = /(?<![:\w/])\/\/([a-zA-Z0-9][a-zA-Z0-9_-]*)(?:\(([^)]*)\))?(!)?/g;
+
+export function parseWorkflowArgs(argsString: string | undefined): Record<string, string> {
+  if (!argsString) return {};
+
+  const args: Record<string, string> = {};
+  const argPattern = /(\w+)=(?:"([^"]*)"|'([^']*)'|([^\s,]+))/g;
+
+  let match;
+  while ((match = argPattern.exec(argsString)) !== null) {
+    const key = match[1];
+    const value = match[2] ?? match[3] ?? match[4];
+    args[key] = value;
+  }
+
+  return args;
+}
 
 export function detectWorkflowMentions(text: string): WorkflowMention[] {
   const matches: WorkflowMention[] = [];
@@ -46,9 +63,12 @@ export function detectWorkflowMentions(text: string): WorkflowMention[] {
 
   while ((match = WORKFLOW_MENTION_PATTERN.exec(text)) !== null) {
     const name = match[1];
+    const argsString = match[2];
+    const force = match[3] === '!';
+    
     if (!seen.has(name)) {
       seen.add(name);
-      matches.push({ name, force: match[2] === '!' });
+      matches.push({ name, force, args: parseWorkflowArgs(argsString) });
     }
   }
   
@@ -108,4 +128,28 @@ export function formatSuggestion(name: string, aliases: string[], maxAliases = 3
   if (aliases.length === 0) return name;
   const topAliases = aliases.slice(0, maxAliases).join(' | ');
   return `${name} (${topAliases})`;
+}
+
+export type VariableResolver = () => string;
+
+export const BUILTIN_VARIABLES: Record<string, VariableResolver> = {
+  TODAY: () => new Date().toISOString().split('T')[0],
+  NOW: () => new Date().toISOString().replace('T', ' ').split('.')[0],
+};
+
+export function expandVariables(
+  content: string,
+  extraVars?: Record<string, VariableResolver>
+): string {
+  const allVars = { ...BUILTIN_VARIABLES, ...extraVars };
+
+  return content.replace(/\{\{(\w+)\}\}/g, (match, name) => {
+    const resolver = allVars[name];
+    if (!resolver) return match;
+    try {
+      return resolver();
+    } catch {
+      return match;
+    }
+  });
 }

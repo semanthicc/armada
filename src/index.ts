@@ -2,9 +2,10 @@ import type { Plugin, PluginInput } from '@opencode-ai/plugin';
 import type { Part, UserMessage } from '@opencode-ai/sdk';
 import { tool } from '@opencode-ai/plugin';
 import { existsSync, readdirSync, readFileSync, writeFileSync, unlinkSync, mkdirSync, renameSync } from 'fs';
+import { execSync } from 'child_process';
 import { join, basename } from 'path';
 import { homedir } from 'os';
-import { findBestMatch, findAllMatches, findWorkflowByName, detectWorkflowMentions, parseFrontmatter, formatSuggestion } from './core';
+import { findBestMatch, findAllMatches, findWorkflowByName, detectWorkflowMentions, parseFrontmatter, formatSuggestion, expandVariables, VariableResolver } from './core';
 
 interface WorkflowInfo {
   name: string;
@@ -126,6 +127,7 @@ const DISTINCTION_RULE = `
 <system-rule>
 **DISTINCTION RULE**:
 - **Tools**: Native functions provided by plugins (e.g., \`create_workflow\`, \`rename_workflow\`). Call them directly.
+  - **CRITICAL**: The \`workflows\` directory is MANAGED. NEVER use \`read\`, \`write\`, \`edit\`, or \`glob\` on workflow files directly. ALWAYS use the dedicated tools (\`list_workflows\`, \`get_workflow\`, \`edit_workflow\`).
 - **Skills**: Markdown-defined capabilities (e.g., \`skills_brand_guidelines\`). Call via \`skill\` tool or \`skills_*\` dynamic tools (if present).
 - **Workflows**: Inline templates triggered by \`//name\` (e.g., \`//commit_review\`). Do NOT call them; just mention them.
 </system-rule>
@@ -151,6 +153,18 @@ async function showToast(
 export const WorkflowsPlugin: Plugin = async (ctx: PluginInput) => {
   const { directory } = ctx;
   let workflows = loadWorkflows(directory);
+
+  const contextVariables: Record<string, VariableResolver> = {
+    PROJECT: () => basename(directory),
+    BRANCH: () => {
+      try {
+        return execSync('git branch --show-current', { cwd: directory, encoding: 'utf-8' }).trim();
+      } catch {
+        return 'unknown';
+      }
+    },
+    USER: () => process.env.USER || process.env.USERNAME || 'unknown',
+  };
 
   return {
     "experimental.chat.system.transform": async (
@@ -236,7 +250,7 @@ export const WorkflowsPlugin: Plugin = async (ctx: PluginInput) => {
             const suggestions = new Map<string, string[]>();
             let expanded = textPart.text;
 
-            for (const { name, force } of mentions) {
+            for (const { name, force, args } of mentions) {
               const canonicalName = findWorkflowByName(name, [...workflows.keys()]);
               const workflow = canonicalName ? workflows.get(canonicalName) : null;
               
@@ -254,9 +268,20 @@ export const WorkflowsPlugin: Plugin = async (ctx: PluginInput) => {
                 const id = shortId(messageID);
                 workflowRefs.set(canonicalName, { id, messageID });
                 found.push(canonicalName);
+                
+                const argsAsResolvers: Record<string, VariableResolver> = {};
+                for (const [key, value] of Object.entries(args)) {
+                  argsAsResolvers[`args.${key}`] = () => value;
+                }
+                
+                const expandedContent = expandVariables(workflow.content, { ...contextVariables, ...argsAsResolvers });
+                const mentionPattern = args && Object.keys(args).length > 0
+                  ? new RegExp(`(?<![:\\\\w/])//${name}\\([^)]*\\)!?(?![\\\\w-])`, 'g')
+                  : new RegExp(`(?<![:\\\\w/])//${name}!?(?![\\\\w-])`, 'g');
+                  
                 expanded = expanded.replace(
-                  new RegExp(`(?<![:\\\\w/])//${name}!?(?![\\\\w-])`, 'g'),
-                  `\n\n<workflow name="${canonicalName}" id="${canonicalName}-${id}" source="${workflow.source}">\n${workflow.content}\n</workflow>\n\n`
+                  mentionPattern,
+                  `\n\n<workflow name="${canonicalName}" id="${canonicalName}-${id}" source="${workflow.source}">\n${expandedContent}\n</workflow>\n\n`
                 );
               } else {
                 reused.push(canonicalName);

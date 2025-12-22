@@ -1,6 +1,23 @@
 # Patchlog
 
-## [1.2.0] - 2025-01-13
+## [1.2.1] - 2025-12-22
+
+### Added
+- Workflow variables: `{{TODAY}}`, `{{NOW}}`, `{{PROJECT}}`, `{{BRANCH}}`, `{{USER}}`
+- Workflow parameters: `//workflow(key=value)` syntax with `{{args.key}}` expansion
+- Support for quoted values in parameters: `//review(file="path with spaces.ts")`
+- 85 unit tests (up from 61)
+
+### Changed
+- Variable expansion happens automatically before workflow injection
+- DISTINCTION RULE now forbids raw file access to workflow directory
+- `//patchlog` workflow now uses `{{TODAY}}` for automatic date
+
+### Fixed
+- Date placeholder in patchlog entries now auto-populated
+
+
+## [1.2.0] - 2025-12-22
 
 ### Added
 - Canonical workflow lookup: `//5approaches` now auto-executes `5-approaches`
