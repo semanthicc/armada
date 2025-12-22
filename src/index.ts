@@ -5,7 +5,7 @@ import { existsSync, readdirSync, readFileSync, writeFileSync, unlinkSync, mkdir
 import { execSync } from 'child_process';
 import { join, basename } from 'path';
 import { homedir } from 'os';
-import { findBestMatch, findAllMatches, findWorkflowByName, detectWorkflowMentions, parseFrontmatter, formatSuggestion, expandVariables, VariableResolver, AutoworkflowMode, TagEntry } from './core';
+import { findBestMatch, findAllMatches, findWorkflowByName, detectWorkflowMentions, parseFrontmatter, formatSuggestion, expandVariables, VariableResolver, AutoworkflowMode, TagEntry, isOrGroup } from './core';
 
 interface WorkflowInfo {
   name: string;
@@ -187,6 +187,7 @@ const DISTINCTION_RULE = `
 2. **\`[use_workflow:X-id]\` WITHOUT XML**: Orphan reference. Use \`get_workflow\` to retrieve it.
 3. **\`[Auto-apply workflows: //X, //Y]\` HINT**: System detected relevant workflows based on your message. Check the \`<workflow-catalog>\` descriptions. If ANY workflow matches what user actually wants → fetch it with \`get_workflow\` and apply it. No asking. No suggesting. Just do it.
 4. **\`[Suggested workflows: //X]\` HINT**: Show this suggestion to the user. Do NOT auto-apply. Let user decide.
+5. **User explicitly runs \`//workflow\`**: If the workflow content is NOT already in the conversation history, use \`get_workflow\` to fetch fresh context before executing.
 
 **CREATING WORKFLOWS**: When user asks to create a workflow, use the \`create_workflow\` tool. NEVER manually create .md files.
 </system-rule>
@@ -307,11 +308,18 @@ export const WorkflowsPlugin: Plugin = async (ctx: PluginInput) => {
                   
                   for (const tag of w.tags) {
                     if (Array.isArray(tag)) {
+                      // AND group: all words must match
                       const allInGroup = tag.every(t => userContent.includes(t.toLowerCase()));
                       if (allInGroup && tag.length > 0) {
                         groupMatched = true;
                       }
+                    } else if (isOrGroup(tag)) {
+                      // OR group: any word matches counts as 1 single match
+                      if (tag.or.some(t => userContent.includes(t.toLowerCase()))) {
+                        singleMatches++;
+                      }
                     } else {
+                      // Single tag
                       if (userContent.includes(tag.toLowerCase())) {
                         singleMatches++;
                       }

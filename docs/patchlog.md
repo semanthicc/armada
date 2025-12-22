@@ -1,5 +1,17 @@
 # Patchlog
 
+## [1.2.4] - 2025-12-23
+
+### Added
+- Tag groups syntax `[[word1, word2]]` for workflows - requires ALL words present to trigger (reduces false positives)
+- 3-mode autoworkflow control: `true` (auto-apply), `hintForUser` (suggest only), `false` (disabled)
+- Inline descriptions in auto-apply hints help AI decide workflow relevance
+- `create_workflow` tool now accepts `description`, `tags`, and `autoworkflow` arguments
+
+### Changed
+- Workflow hints now show descriptions: `[Auto-apply workflows: //name — "description" — ...]`
+
+
 ## [1.2.3] - 2025-12-22
 
 ### Added

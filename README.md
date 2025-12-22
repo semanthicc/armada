@@ -153,20 +153,29 @@ Then do this...
 
 ### Tag Groups (Smart Matching)
 
-Tags support **groups** for more precise matching. A tag group requires ALL words to be present:
+Tags support **groups**, **OR alternatives**, and **phrase matching** for precise matching:
 
 ```yaml
-tags: [commit, [staged, changes], review, [security, audit]]
+tags: [commit, [staged, changes], patchnote|patchlog, [check my, commit]]
 ```
 
 | Tag Type | Example | Triggers When |
 |----------|---------|---------------|
 | **Single** | `commit` | Word present (needs ≥2 singles to trigger) |
-| **Group** | `[staged, changes]` | ALL words in group present (triggers immediately) |
+| **Group (AND)** | `[staged, changes]` | ALL words in group present (triggers immediately) |
+| **OR** | `patchnote\|patchlog` | ANY word matches (counts as 1 single match) |
+| **Phrase** | `[check my, commit]` | Phrase "check my" as substring + "commit" present |
+
+**Phrase Matching:**
+Spaces inside group items create **exact phrase matches**. The phrase must appear as a substring in that exact order:
+- `[review my, changes]` → matches "can you review my changes" ✓
+- `[review my, changes]` → does NOT match "my review of changes" ✗ (wrong order)
 
 **Matching Rules:**
-- A **group match** (all words present) triggers the workflow immediately
+- A **group match** (all items present) triggers the workflow immediately
 - **Single tags** need ≥2 matches to trigger
+- **OR tags** count as ONE single match if any alternative matches
+- **Phrases** match as literal substrings (order matters!)
 - Matching **workflow name**, **alias**, or **description** also triggers
 
 **Examples:**
@@ -176,6 +185,10 @@ tags: [commit, [staged, changes], review, [security, audit]]
 | "check my staged changes" | Group `[staged, changes]` ✓ | ✅ YES |
 | "commit this code" | Single `commit` only | ❌ NO (only 1 single) |
 | "commit and review" | Singles `commit` + `review` | ✅ YES (2 singles) |
+| "generate patchlog" | OR `patchnote\|patchlog` (1 match) | ❌ NO (only 1 single) |
+| "patchlog for commit" | OR `patchnote\|patchlog` + `commit` | ✅ YES (2 singles) |
+| "check my commit" | Phrase `check my` + `commit` ✓ | ✅ YES |
+| "my check commit" | Phrase `check my` ✗ (wrong order) | ❌ NO |
 
 ### Shortcuts / Aliases
 

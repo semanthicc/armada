@@ -376,6 +376,42 @@ describe('parseTagsField', () => {
   test('handles whitespace', () => {
     expect(parseTagsField('tags: [ commit , [ staged , changes ] ]')).toEqual(['commit', ['staged', 'changes']]);
   });
+
+  test('parses OR syntax with pipe', () => {
+    expect(parseTagsField('tags: [patchnote|patchlog, commit]')).toEqual([
+      { or: ['patchnote', 'patchlog'] },
+      'commit'
+    ]);
+  });
+
+  test('parses multiple OR groups', () => {
+    expect(parseTagsField('tags: [foo|bar, baz|qux]')).toEqual([
+      { or: ['foo', 'bar'] },
+      { or: ['baz', 'qux'] }
+    ]);
+  });
+
+  test('parses OR with three alternatives', () => {
+    expect(parseTagsField('tags: [a|b|c, single]')).toEqual([
+      { or: ['a', 'b', 'c'] },
+      'single'
+    ]);
+  });
+
+  test('mixes OR groups with AND groups', () => {
+    expect(parseTagsField('tags: [foo|bar, [staged, changes], single]')).toEqual([
+      { or: ['foo', 'bar'] },
+      ['staged', 'changes'],
+      'single'
+    ]);
+  });
+
+  test('handles OR with whitespace', () => {
+    expect(parseTagsField('tags: [ foo | bar , commit ]')).toEqual([
+      { or: ['foo', 'bar'] },
+      'commit'
+    ]);
+  });
 });
 
 describe('parseFrontmatter', () => {

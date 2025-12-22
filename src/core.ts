@@ -94,7 +94,12 @@ export function parseArrayField(yaml: string, fieldName: string): string[] {
   return raw.split(',').map(a => a.trim().replace(/['"]/g, '')).filter(a => a);
 }
 
-export type TagEntry = string | string[];
+export type OrGroup = { or: string[] };
+export type TagEntry = string | string[] | OrGroup;
+
+export function isOrGroup(entry: TagEntry): entry is OrGroup {
+  return typeof entry === 'object' && !Array.isArray(entry) && 'or' in entry;
+}
 
 export function parseTagsField(yaml: string): TagEntry[] {
   const regex = /^tags:\s*\[([\s\S]*?)\]\s*$/m;
@@ -136,7 +141,11 @@ export function parseTagsField(yaml: string): TagEntry[] {
     } else if (char === ',' && depth === 0) {
       const trimmed = current.trim().replace(/['"]/g, '');
       if (trimmed) {
-        result.push(trimmed);
+        if (trimmed.includes('|')) {
+          result.push({ or: trimmed.split('|').map(s => s.trim()).filter(s => s) });
+        } else {
+          result.push(trimmed);
+        }
       }
       current = '';
       continue;
@@ -154,7 +163,11 @@ export function parseTagsField(yaml: string): TagEntry[] {
   
   const trimmed = current.trim().replace(/['"]/g, '');
   if (trimmed && !inGroup) {
-    result.push(trimmed);
+    if (trimmed.includes('|')) {
+      result.push({ or: trimmed.split('|').map(s => s.trim()).filter(s => s) });
+    } else {
+      result.push(trimmed);
+    }
   }
   
   return result;
