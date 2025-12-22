@@ -19,6 +19,43 @@ interface WorkflowInfo {
   path: string;
 }
 
+interface WorkflowConfig {
+  deduplicateSameMessage: boolean;
+}
+
+interface PluginEvent {
+  type: string;
+  properties?: {
+    sessionID?: string;
+    messageID?: string;
+    [key: string]: unknown;
+  };
+}
+
+function loadConfig(): WorkflowConfig {
+  const configDir = join(homedir(), '.config', 'opencode');
+  const configPath = join(configDir, 'workflows.json');
+  
+  try {
+    if (!existsSync(configDir)) {
+      mkdirSync(configDir, { recursive: true });
+    }
+
+    if (!existsSync(configPath)) {
+      const defaultConfig: WorkflowConfig = { deduplicateSameMessage: true };
+      writeFileSync(configPath, JSON.stringify(defaultConfig, null, 2), 'utf-8');
+      return defaultConfig;
+    }
+
+    const content = readFileSync(configPath, 'utf-8');
+    const json = JSON.parse(content);
+    return {
+      deduplicateSameMessage: json.deduplicateSameMessage ?? true
+    };
+  } catch {}
+  return { deduplicateSameMessage: true };
+}
+
 function getWorkflowDirs(projectDir: string): { path: string; source: 'project' | 'global' }[] {
   const dirs: { path: string; source: 'project' | 'global' }[] = [];
 
@@ -95,7 +132,8 @@ function shortId(messageID: string): string {
 
 function expandWorkflowMentions(
   text: string,
-  workflows: Map<string, WorkflowInfo>
+  workflows: Map<string, WorkflowInfo>,
+  config: WorkflowConfig
 ): { expanded: string; found: string[]; notFound: string[]; suggestions: Map<string, string> } {
   const mentions = detectWorkflowMentions(text);
   const found: string[] = [];
@@ -103,14 +141,27 @@ function expandWorkflowMentions(
   const suggestions = new Map<string, string>();
   let expanded = text;
 
-  for (const { name, force } of mentions) {
+  for (const { name, force, args } of mentions) {
     const workflow = workflows.get(name);
     if (workflow) {
       found.push(name);
-      expanded = expanded.replace(
-        new RegExp(`(?<![:\\\\w/])//${name}!?(?![\\\\w-])`, 'g'),
-        `\n\n<workflow name="${name}" source="${workflow.source}">\n${workflow.content}\n</workflow>\n\n`
-      );
+      
+      const mentionPatternStr = args && Object.keys(args).length > 0
+        ? `(?<![:\\\\w/])//${name}\\([^)]*\\)!?(?![\\\\w-])`
+        : `(?<![:\\\\w/])//${name}!?(?![\\\\w-])`;
+
+      const fullContent = `\n\n<workflow name="${name}" source="${workflow.source}">\n${workflow.content}\n</workflow>\n\n`;
+
+      if (config.deduplicateSameMessage) {
+        const firstPattern = new RegExp(mentionPatternStr);
+        expanded = expanded.replace(firstPattern, fullContent);
+
+        const remainingPattern = new RegExp(mentionPatternStr, 'g');
+        expanded = expanded.replace(remainingPattern, `[use_workflow:${name}]`);
+      } else {
+        const globalPattern = new RegExp(mentionPatternStr, 'g');
+        expanded = expanded.replace(globalPattern, fullContent);
+      }
     } else {
       notFound.push(name);
       const match = findBestMatch(name, [...workflows.keys()]);
@@ -130,6 +181,8 @@ const DISTINCTION_RULE = `
   - **CRITICAL**: The \`workflows\` directory is MANAGED. NEVER use \`read\`, \`write\`, \`edit\`, or \`glob\` on workflow files directly. ALWAYS use the dedicated tools (\`list_workflows\`, \`get_workflow\`, \`edit_workflow\`).
 - **Skills**: Markdown-defined capabilities (e.g., \`skills_brand_guidelines\`). Call via \`skill\` tool or \`skills_*\` dynamic tools (if present).
 - **Workflows**: Inline templates triggered by \`//name\` (e.g., \`//commit_review\`). Do NOT call them; just mention them.
+  - **ALREADY EXPANDED**: If you see \`<workflow name="X">\` XML in the conversation, the content is RIGHT THERE - just follow it directly. Do NOT call \`list_workflows\` or \`get_workflow\` to look it up again.
+  - **ORPHAN REF RECOVERY**: If you see \`[use_workflow:X-id]\` but cannot find the corresponding \`<workflow name="X">\` content in the conversation, use the \`get_workflow\` tool to retrieve it.
 </system-rule>
 `;
 
@@ -153,6 +206,7 @@ async function showToast(
 export const WorkflowsPlugin: Plugin = async (ctx: PluginInput) => {
   const { directory } = ctx;
   let workflows = loadWorkflows(directory);
+  let config = loadConfig();
 
   const contextVariables: Record<string, VariableResolver> = {
     PROJECT: () => basename(directory),
@@ -209,6 +263,7 @@ export const WorkflowsPlugin: Plugin = async (ctx: PluginInput) => {
     ) => {
       try {
         workflows = loadWorkflows(directory);
+        config = loadConfig();
         const sessionID = _input.sessionID;
         const messageID = _input.messageID || '';
 
@@ -275,20 +330,62 @@ export const WorkflowsPlugin: Plugin = async (ctx: PluginInput) => {
                 }
                 
                 const expandedContent = expandVariables(workflow.content, { ...contextVariables, ...argsAsResolvers });
-                const mentionPattern = args && Object.keys(args).length > 0
-                  ? new RegExp(`(?<![:\\\\w/])//${name}\\([^)]*\\)!?(?![\\\\w-])`, 'g')
-                  : new RegExp(`(?<![:\\\\w/])//${name}!?(?![\\\\w-])`, 'g');
-                  
-                expanded = expanded.replace(
-                  mentionPattern,
-                  `\n\n<workflow name="${canonicalName}" id="${canonicalName}-${id}" source="${workflow.source}">\n${expandedContent}\n</workflow>\n\n`
-                );
+                
+                const mentionPatternStr = args && Object.keys(args).length > 0
+                  ? `(?<![:\\\\w/])//${name}\\([^)]*\\)!?(?![\\\\w-])`
+                  : `(?<![:\\\\w/])//${name}!?(?![\\\\w-])`;
+                
+                const fullContent = `\n\n<workflow name="${canonicalName}" id="${canonicalName}-${id}" source="${workflow.source}">\n${expandedContent}\n</workflow>\n\n`;
+
+                if (config.deduplicateSameMessage) {
+                  const firstPattern = new RegExp(mentionPatternStr);
+                  expanded = expanded.replace(firstPattern, fullContent);
+
+                  const remainingPattern = new RegExp(mentionPatternStr, 'g');
+                  if (remainingPattern.test(expanded)) {
+                    expanded = expanded.replace(
+                      remainingPattern,
+                      `[use_workflow:${canonicalName}-${id}]`
+                    );
+                    if (!reused.includes(canonicalName)) {
+                      reused.push(canonicalName);
+                    }
+                  }
+                } else {
+                  const globalPattern = new RegExp(mentionPatternStr, 'g');
+                  expanded = expanded.replace(globalPattern, fullContent);
+                }
               } else {
                 reused.push(canonicalName);
                 expanded = expanded.replace(
                   new RegExp(`(?<![:\\\\w/])//${name}(?![\\\\w-])`, 'g'),
-                  `[workflow:${canonicalName}-${existingRef.id}]`
+                  `[use_workflow:${canonicalName}-${existingRef.id}]`
                 );
+              }
+            }
+
+            const useWorkflowPattern = /\[use_workflow:([a-zA-Z0-9_-]+)-[a-zA-Z0-9]+\]/g;
+            let refMatch;
+            while ((refMatch = useWorkflowPattern.exec(expanded)) !== null) {
+              const refName = refMatch[1];
+              const hasFullExpansion = expanded.includes(`<workflow name="${refName}"`);
+              if (!hasFullExpansion) {
+                const workflow = workflows.get(refName);
+                if (workflow) {
+                  const id = shortId(messageID);
+                  workflowRefs.set(refName, { id, messageID });
+                  if (!found.includes(refName)) {
+                    found.push(refName);
+                  }
+                  const idx = reused.indexOf(refName);
+                  if (idx !== -1) {
+                    reused.splice(idx, 1);
+                  }
+                  
+                  const fullContent = `\n\n<workflow name="${refName}" id="${refName}-${id}" source="${workflow.source}">\n${workflow.content}\n</workflow>\n\n`;
+                  expanded = expanded.replace(refMatch[0], fullContent);
+                  useWorkflowPattern.lastIndex = 0;
+                }
               }
             }
 
@@ -335,15 +432,24 @@ export const WorkflowsPlugin: Plugin = async (ctx: PluginInput) => {
       }
     },
 
-    event: async ({ event }) => {
-      // @ts-ignore - event.type exists at runtime
+    event: async ({ event }: { event: PluginEvent }) => {
       if (event.type === 'session.created') {
         workflows = loadWorkflows(directory);
+        config = loadConfig();
       }
-      // @ts-ignore
       if (event.type === 'session.deleted' && event.properties?.sessionID) {
-        // @ts-ignore
         sessionWorkflows.delete(event.properties.sessionID);
+      }
+      if (event.type === 'message.removed' && event.properties?.sessionID && event.properties?.messageID) {
+        const workflowRefs = sessionWorkflows.get(event.properties.sessionID);
+        if (workflowRefs) {
+          const removedMessageID = event.properties.messageID;
+          for (const [name, ref] of workflowRefs.entries()) {
+            if (ref.messageID === removedMessageID) {
+              workflowRefs.delete(name);
+            }
+          }
+        }
       }
     },
 
@@ -357,7 +463,8 @@ export const WorkflowsPlugin: Plugin = async (ctx: PluginInput) => {
         },
         async execute(args) {
           workflows = loadWorkflows(directory);
-          const { expanded, found, notFound } = expandWorkflowMentions(args.text, workflows);
+          config = loadConfig();
+          const { expanded, found, notFound } = expandWorkflowMentions(args.text, workflows, config);
 
           if (found.length === 0 && notFound.length === 0) {
             return `No //workflow mentions detected in text.\n\nOriginal: ${args.text}`;
@@ -517,6 +624,7 @@ export const WorkflowsPlugin: Plugin = async (ctx: PluginInput) => {
         async execute() {
           const oldCount = workflows.size;
           workflows = loadWorkflows(directory);
+          config = loadConfig();
           const newCount = workflows.size;
 
           const workflowList = [...workflows.keys()].map((w) => `//${w}`).join(', ') || 'none';
@@ -526,3 +634,5 @@ export const WorkflowsPlugin: Plugin = async (ctx: PluginInput) => {
     },
   };
 };
+
+export { loadConfig, expandWorkflowMentions, WorkflowConfig, WorkflowInfo };
