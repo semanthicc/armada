@@ -1,6 +1,6 @@
 {
   "name": "opencode-workflows",
-  "version": "1.1.0",
+  "version": "1.1.2",
   "description": "Inline workflow mentions for OpenCode - use //workflow-name anywhere in your prompts",
   "type": "module",
   "main": "dist/index.js",

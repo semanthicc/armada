@@ -177,23 +177,6 @@ function expandWorkflowMentions(
   return { expanded, found, notFound, suggestions };
 }
 
-function buildWorkflowContext(found: string[], notFound: string[], suggestions: Map<string, string>): string {
-  if (found.length === 0 && notFound.length === 0) return '';
-  
-  let context = `\n\n<workflows-context>\n`;
-  if (found.length > 0) {
-    context += `Expanded: ${found.join(', ')}\n`;
-  }
-  if (notFound.length > 0) {
-    context += `Not found: ${notFound.join(', ')}\n`;
-    suggestions.forEach((suggestion, typo) => {
-      context += `Did you mean //${suggestion} instead of //${typo}?\n`;
-    });
-  }
-  context += `</workflows-context>\n`;
-  return context;
-}
-
 const DISTINCTION_RULE = `
 <system-rule>
 **DISTINCTION RULE**:
@@ -302,15 +285,22 @@ export const WorkflowsPlugin: Plugin = async (ctx: PluginInput) => {
 
             if (found.length === 0 && notFound.length === 0) continue;
 
-            const workflowContext = buildWorkflowContext(found, notFound, suggestions);
-
-            if (found.length === 0) {
-              textPart.text = `${textPart.text}\n\n${workflowContext}`;
-            } else {
-              textPart.text = expanded + workflowContext;
+            if (found.length > 0) {
+              textPart.text = expanded;
+              showToast(ctx, `Expanded: ${found.join(', ')}`, "success", "Workflows");
             }
 
-            showToast(ctx, `Expanded: ${found.join(', ')}`, "success", "Workflows");
+            if (notFound.length > 0) {
+              const suggestionMsg = [...suggestions.entries()]
+                .map(([typo, suggestion]) => `${typo} → ${suggestion}`)
+                .join(', ');
+              
+              if (suggestionMsg) {
+                showToast(ctx, `Did you mean: ${suggestionMsg}?`, "warning", "Unknown Workflow");
+              } else {
+                showToast(ctx, `Not found: ${notFound.join(', ')}`, "warning", "Unknown Workflow");
+              }
+            }
           }
         }
       } catch (error) {

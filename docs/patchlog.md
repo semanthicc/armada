@@ -1,5 +1,22 @@
 # Patchlog
 
+## [1.1.2] - 2025-12-22
+
+### Changed
+- "Did you mean?" suggestions now show as TUI toast directly to user
+- Remove `<workflows-context>` block entirely - all feedback via toasts
+
+### Removed  
+- `buildWorkflowContext` function - no longer needed
+
+## [1.1.1] - 2025-12-22
+
+### Changed
+- Remove redundant `<workflows-context>` output on successful expansion (the `<workflow>` tags already contain all needed info)
+
+### Fixed
+- Cleaner chat output - only show context block for errors and "Did you mean?" suggestions
+
 ## [1.0.0] - 2025-12-21
 
 ### Added
