@@ -5,15 +5,15 @@ import { existsSync, readdirSync, readFileSync, writeFileSync, unlinkSync, mkdir
 import { execSync } from 'child_process';
 import { join, basename } from 'path';
 import { homedir } from 'os';
-import { findBestMatch, findAllMatches, findWorkflowByName, detectWorkflowMentions, parseFrontmatter, formatSuggestion, expandVariables, VariableResolver } from './core';
+import { findBestMatch, findAllMatches, findWorkflowByName, detectWorkflowMentions, parseFrontmatter, formatSuggestion, expandVariables, VariableResolver, AutoworkflowMode, TagEntry } from './core';
 
 interface WorkflowInfo {
   name: string;
   aliases: string[];
-  tags: string[];
+  tags: TagEntry[];
   agents: string[];
   description: string;
-  autoworkflow: boolean;
+  autoworkflow: AutoworkflowMode;
   content: string;
   source: 'project' | 'global';
   path: string;
@@ -178,11 +178,17 @@ const DISTINCTION_RULE = `
 <system-rule>
 **DISTINCTION RULE**:
 - **Tools**: Native functions provided by plugins (e.g., \`create_workflow\`, \`rename_workflow\`). Call them directly.
-  - **CRITICAL**: The \`workflows\` directory is MANAGED. NEVER use \`read\`, \`write\`, \`edit\`, or \`glob\` on workflow files directly. ALWAYS use the dedicated tools (\`list_workflows\`, \`get_workflow\`, \`edit_workflow\`).
+  - **CRITICAL**: The \`workflows\` directory is MANAGED. NEVER use \`read\`, \`write\`, \`edit\`, or \`glob\` on workflow files directly. ALWAYS use the dedicated tools (\`list_workflows\`, \`get_workflow\`, \`edit_workflow\`, \`create_workflow\`).
 - **Skills**: Markdown-defined capabilities (e.g., \`skills_brand_guidelines\`). Call via \`skill\` tool or \`skills_*\` dynamic tools (if present).
 - **Workflows**: Inline templates triggered by \`//name\` (e.g., \`//commit_review\`). Do NOT call them; just mention them.
-  - **ALREADY EXPANDED**: If you see \`<workflow name="X">\` XML in the conversation, the content is RIGHT THERE - just follow it directly. Do NOT call \`list_workflows\` or \`get_workflow\` to look it up again.
-  - **ORPHAN REF RECOVERY**: If you see \`[use_workflow:X-id]\` but cannot find the corresponding \`<workflow name="X">\` content in the conversation, use the \`get_workflow\` tool to retrieve it.
+
+**WORKFLOW XML HANDLING** (READ THIS, IT'S IMPORTANT):
+1. **\`<workflow name="X">\` IN MESSAGE**: The content is RIGHT THERE. Read it. Follow it. Execute it. Do NOT call \`get_workflow\` — that's stupid, the content is already in front of you.
+2. **\`[use_workflow:X-id]\` WITHOUT XML**: Orphan reference. Use \`get_workflow\` to retrieve it.
+3. **\`[Auto-apply workflows: //X, //Y]\` HINT**: System detected relevant workflows based on your message. Check the \`<workflow-catalog>\` descriptions. If ANY workflow matches what user actually wants → fetch it with \`get_workflow\` and apply it. No asking. No suggesting. Just do it.
+4. **\`[Suggested workflows: //X]\` HINT**: Show this suggestion to the user. Do NOT auto-apply. Let user decide.
+
+**CREATING WORKFLOWS**: When user asks to create a workflow, use the \`create_workflow\` tool. NEVER manually create .md files.
 </system-rule>
 `;
 
@@ -230,20 +236,31 @@ export const WorkflowsPlugin: Plugin = async (ctx: PluginInput) => {
         output.system.push(DISTINCTION_RULE);
       }
 
-      const activeAgent = (input as any).agent as string | undefined;
+      const activeAgent = input.agent;
       const catalogEntries = [...workflows.values()]
-        .filter(w => w.autoworkflow)
+        .filter(w => w.autoworkflow === 'true' || w.autoworkflow === 'hintForUser')
         .filter(w => w.agents.length === 0 || (activeAgent && w.agents.includes(activeAgent)))
+        .filter((w, idx, arr) => arr.findIndex(x => x.name === w.name) === idx)
         .map(w => {
           const tagsStr = w.tags.length > 0 ? ` [${w.tags.join(', ')}]` : '';
           const aliasStr = w.aliases.length > 0 ? ` (aliases: ${w.aliases.join(', ')})` : '';
-          return `//${w.name}${aliasStr}: ${w.description || 'No description'}${tagsStr}`;
+          const modeStr = w.autoworkflow === 'hintForUser' ? ' {user-decides}' : '';
+          return `//${w.name}${aliasStr}: ${w.description || 'No description'}${tagsStr}${modeStr}`;
         });
 
       if (catalogEntries.length > 0) {
         output.system.push(
-          `<workflow-catalog>\n${catalogEntries.join('\n')}\n</workflow-catalog>\n` +
-          `If user's request matches a workflow's tags or description, suggest it.`
+          `<workflow-catalog description="Available auto-workflows with their descriptions. Use these to decide relevance.">\n${catalogEntries.join('\n')}\n</workflow-catalog>\n\n` +
+          `<auto-workflow-behavior>\n` +
+          `When you see [Auto-apply workflows: //X — "description" — if relevant, use get_workflow("name") to fetch and apply]:\n` +
+          `1. The description is RIGHT THERE in the hint — read it\n` +
+          `2. If description matches user's intent → call get_workflow("X") and APPLY it\n` +
+          `3. No asking permission. No "would you like me to...". Just fetch and execute.\n` +
+          `4. If description does NOT match intent → ignore, proceed normally\n` +
+          `\n` +
+          `When you see [Suggested workflows: //X — "description"]:\n` +
+          `- These are {user-decides} workflows. Show the suggestion to the user, do NOT auto-apply.\n` +
+          `</auto-workflow-behavior>`
         );
       }
     },
@@ -281,20 +298,47 @@ export const WorkflowsPlugin: Plugin = async (ctx: PluginInput) => {
               const activeAgent = _input.agent;
               const userContent = textPart.text.toLowerCase();
 
-              const hints = [...workflows.values()]
-                .filter(w => w.autoworkflow)
+              const matchingWorkflows = [...workflows.values()]
+                .filter(w => w.autoworkflow === 'true' || w.autoworkflow === 'hintForUser')
                 .filter(w => w.agents.length === 0 || (activeAgent && w.agents.includes(activeAgent)))
                 .filter(w => {
-                  const matchesTags = w.tags.some(t => userContent.includes(t.toLowerCase()));
+                  let singleMatches = 0;
+                  let groupMatched = false;
+                  
+                  for (const tag of w.tags) {
+                    if (Array.isArray(tag)) {
+                      const allInGroup = tag.every(t => userContent.includes(t.toLowerCase()));
+                      if (allInGroup && tag.length > 0) {
+                        groupMatched = true;
+                      }
+                    } else {
+                      if (userContent.includes(tag.toLowerCase())) {
+                        singleMatches++;
+                      }
+                    }
+                  }
+                  
                   const matchesDesc = w.description && userContent.includes(w.description.toLowerCase().slice(0, 20));
                   const matchesAlias = w.aliases.some(a => userContent.includes(a.toLowerCase()));
                   const matchesName = userContent.includes(w.name.toLowerCase());
-                  return matchesTags || matchesDesc || matchesAlias || matchesName;
+                  
+                  return groupMatched || singleMatches >= 2 || matchesDesc || matchesAlias || matchesName;
                 })
-                .map(w => `//${w.name}`);
+                .filter((w, idx, arr) => arr.findIndex(x => x.name === w.name) === idx);
 
-              if (hints.length > 0) {
-                textPart.text += `\n\n[Relevant workflows: ${hints.join(', ')}]`;
+              const autoApply = matchingWorkflows
+                .filter(w => w.autoworkflow === 'true')
+                .map(w => `//${w.name} — "${w.description || 'No description'}"`);
+              
+              const userHints = matchingWorkflows
+                .filter(w => w.autoworkflow === 'hintForUser')
+                .map(w => `//${w.name} — "${w.description || 'No description'}"`);
+
+              if (autoApply.length > 0) {
+                textPart.text += `\n\n[Auto-apply workflows: ${autoApply.join('; ')} — if relevant, use get_workflow("name") to fetch and apply]`;
+              }
+              if (userHints.length > 0) {
+                textPart.text += `\n\n[Suggested workflows: ${userHints.join('; ')}]`;
               }
               continue;
             }
@@ -519,12 +563,15 @@ export const WorkflowsPlugin: Plugin = async (ctx: PluginInput) => {
       }),
 
       create_workflow: tool({
-        description: 'Create a new workflow template. ASK the user: 1) project or global scope? 2) any shortcuts/aliases they want? Workflows are created with YAML frontmatter.',
+        description: 'Create a new workflow template with YAML frontmatter. ASK user: 1) global or project scope? 2) shortcuts/aliases? 3) description? 4) tags for auto-suggestion? 5) autoworkflow mode (true/hintForUser/false)?',
         args: {
           name: tool.schema.string().describe('The workflow name (without // prefix)'),
           content: tool.schema.string().describe('The markdown content of the workflow (without frontmatter - it will be added automatically)'),
           scope: tool.schema.enum(['global', 'project']).describe('Where to save: global (~/.config/opencode/workflows/) or project (.opencode/workflows/)').optional(),
-          shortcuts: tool.schema.string().describe('Comma-separated shortcuts/aliases for the workflow, e.g., "cr, review_commit"').optional(),
+          shortcuts: tool.schema.string().describe('Comma-separated shortcuts/aliases, e.g., "cr, review"').optional(),
+          description: tool.schema.string().describe('Short description of what the workflow does').optional(),
+          tags: tool.schema.string().describe('Tags for auto-suggestion. Use comma for singles, brackets for groups that must ALL match. E.g., "commit, [staged, changes], review" - groups like [staged,changes] trigger when ALL words present, singles need 2+ matches').optional(),
+          autoworkflow: tool.schema.enum(['true', 'hintForUser', 'false']).describe('Auto-suggestion mode: true (AI applies), hintForUser (user decides), false (no suggestion). Default: false').optional(),
         },
         async execute(args) {
           const scope = args.scope || 'global';
@@ -537,7 +584,19 @@ export const WorkflowsPlugin: Plugin = async (ctx: PluginInput) => {
           const shortcutArray = args.shortcuts 
             ? args.shortcuts.split(',').map(a => a.trim()).filter(a => a)
             : [];
-          const frontmatter = `---\nshortcuts: [${shortcutArray.join(', ')}]\n---\n`;
+          const tagArray = args.tags
+            ? args.tags.split(',').map(t => t.trim()).filter(t => t)
+            : [];
+          
+          const autoVal = args.autoworkflow || 'false';
+          
+          let frontmatter = '---\n';
+          if (args.description) frontmatter += `description: "${args.description}"\n`;
+          if (shortcutArray.length > 0) frontmatter += `shortcuts: [${shortcutArray.join(', ')}]\n`;
+          if (tagArray.length > 0) frontmatter += `tags: [${tagArray.join(', ')}]\n`;
+          frontmatter += `autoworkflow: ${autoVal}\n`;
+          frontmatter += '---\n';
+          
           const fullContent = frontmatter + args.content;
 
           writeFileSync(filePath, fullContent, 'utf-8');
@@ -545,8 +604,10 @@ export const WorkflowsPlugin: Plugin = async (ctx: PluginInput) => {
           
           const shortcutMsg = shortcutArray.length > 0 
             ? `\nShortcuts: ${shortcutArray.map(a => `//${a}`).join(', ')}`
-            : '\nNo shortcuts set (can be added later by editing the file)';
-          return `Workflow "//${args.name}" created successfully in ${scope} scope.\nPath: ${filePath}${shortcutMsg}`;
+            : '';
+          const tagMsg = tagArray.length > 0 ? `\nTags: ${tagArray.join(', ')}` : '';
+          const autoMsg = `\nAutoworkflow: ${autoVal}`;
+          return `Workflow "//${args.name}" created in ${scope} scope.\nPath: ${filePath}${shortcutMsg}${tagMsg}${autoMsg}`;
         },
       }),
 

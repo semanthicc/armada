@@ -8,6 +8,7 @@ import {
   parseWorkflowArgs,
   parseFrontmatter,
   parseArrayField,
+  parseTagsField,
   formatSuggestion,
   expandVariables,
   BUILTIN_VARIABLES
@@ -338,6 +339,45 @@ describe('parseArrayField', () => {
   });
 });
 
+describe('parseTagsField', () => {
+  test('parses simple tags', () => {
+    expect(parseTagsField('tags: [commit, review, check]')).toEqual(['commit', 'review', 'check']);
+  });
+
+  test('parses nested tag group', () => {
+    expect(parseTagsField('tags: [commit, [staged, changes]]')).toEqual(['commit', ['staged', 'changes']]);
+  });
+
+  test('parses multiple nested groups', () => {
+    expect(parseTagsField('tags: [[staged, changes], [think, approach]]')).toEqual([['staged', 'changes'], ['think', 'approach']]);
+  });
+
+  test('parses mixed singles and groups', () => {
+    expect(parseTagsField('tags: [commit, [staged, changes], review, [think, approach]]')).toEqual([
+      'commit', 
+      ['staged', 'changes'], 
+      'review', 
+      ['think', 'approach']
+    ]);
+  });
+
+  test('handles empty array', () => {
+    expect(parseTagsField('tags: []')).toEqual([]);
+  });
+
+  test('handles missing field', () => {
+    expect(parseTagsField('other: value')).toEqual([]);
+  });
+
+  test('strips quotes from tags', () => {
+    expect(parseTagsField('tags: ["commit", \'review\']')).toEqual(['commit', 'review']);
+  });
+
+  test('handles whitespace', () => {
+    expect(parseTagsField('tags: [ commit , [ staged , changes ] ]')).toEqual(['commit', ['staged', 'changes']]);
+  });
+});
+
 describe('parseFrontmatter', () => {
   test('parses complete frontmatter', () => {
     const content = `---
@@ -352,7 +392,7 @@ autoworkflow: true
     expect(result.aliases).toEqual(['cr']);
     expect(result.tags).toEqual(['git', 'commit']);
     expect(result.description).toBe('Review commits');
-    expect(result.autoworkflow).toBe(true);
+    expect(result.autoworkflow).toBe('true');
     expect(result.body).toBe('# Content here');
   });
 
@@ -381,6 +421,7 @@ body`;
     const content = '# Just markdown';
     const result = parseFrontmatter(content);
     expect(result.aliases).toEqual([]);
+    expect(result.autoworkflow).toBe('false');
     expect(result.body).toBe('# Just markdown');
   });
 
@@ -391,7 +432,37 @@ autoworkflow: yes
 body`;
 
     const result = parseFrontmatter(content);
-    expect(result.autoworkflow).toBe(true);
+    expect(result.autoworkflow).toBe('true');
+  });
+
+  test('handles autoworkflow: hintForUser', () => {
+    const content = `---
+autoworkflow: hintForUser
+---
+body`;
+
+    const result = parseFrontmatter(content);
+    expect(result.autoworkflow).toBe('hintForUser');
+  });
+
+  test('handles autoworkflow: hint (alias for hintForUser)', () => {
+    const content = `---
+autoworkflow: hint
+---
+body`;
+
+    const result = parseFrontmatter(content);
+    expect(result.autoworkflow).toBe('hintForUser');
+  });
+
+  test('handles autoworkflow: false explicitly', () => {
+    const content = `---
+autoworkflow: false
+---
+body`;
+
+    const result = parseFrontmatter(content);
+    expect(result.autoworkflow).toBe('false');
   });
 
   test('handles quoted description', () => {
@@ -412,6 +483,16 @@ body`;
 
     const result = parseFrontmatter(content);
     expect(result.agents).toEqual(['coder', 'reviewer']);
+  });
+
+  test('handles nested tag groups in frontmatter', () => {
+    const content = `---
+tags: [commit, [staged, changes], review]
+---
+body`;
+
+    const result = parseFrontmatter(content);
+    expect(result.tags).toEqual(['commit', ['staged', 'changes'], 'review']);
   });
 });
 

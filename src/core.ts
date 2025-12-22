@@ -94,12 +94,80 @@ export function parseArrayField(yaml: string, fieldName: string): string[] {
   return raw.split(',').map(a => a.trim().replace(/['"]/g, '')).filter(a => a);
 }
 
+export type TagEntry = string | string[];
+
+export function parseTagsField(yaml: string): TagEntry[] {
+  const regex = /^tags:\s*\[([\s\S]*?)\]\s*$/m;
+  const match = yaml.match(regex);
+  if (!match) return [];
+  
+  const content = match[1].trim();
+  if (!content) return [];
+  
+  const result: TagEntry[] = [];
+  let depth = 0;
+  let current = '';
+  let inGroup = false;
+  let groupItems: string[] = [];
+  
+  for (let i = 0; i < content.length; i++) {
+    const char = content[i];
+    
+    if (char === '[') {
+      depth++;
+      if (depth === 1) {
+        inGroup = true;
+        groupItems = [];
+        continue;
+      }
+    } else if (char === ']') {
+      depth--;
+      if (depth === 0 && inGroup) {
+        if (current.trim()) {
+          groupItems.push(current.trim().replace(/['"]/g, ''));
+        }
+        if (groupItems.length > 0) {
+          result.push(groupItems);
+        }
+        current = '';
+        inGroup = false;
+        continue;
+      }
+    } else if (char === ',' && depth === 0) {
+      const trimmed = current.trim().replace(/['"]/g, '');
+      if (trimmed) {
+        result.push(trimmed);
+      }
+      current = '';
+      continue;
+    } else if (char === ',' && depth === 1 && inGroup) {
+      const trimmed = current.trim().replace(/['"]/g, '');
+      if (trimmed) {
+        groupItems.push(trimmed);
+      }
+      current = '';
+      continue;
+    }
+    
+    current += char;
+  }
+  
+  const trimmed = current.trim().replace(/['"]/g, '');
+  if (trimmed && !inGroup) {
+    result.push(trimmed);
+  }
+  
+  return result;
+}
+
+export type AutoworkflowMode = 'true' | 'hintForUser' | 'false';
+
 export interface ParsedFrontmatter {
   aliases: string[];
-  tags: string[];
+  tags: TagEntry[];
   agents: string[];
   description: string;
-  autoworkflow: boolean;
+  autoworkflow: AutoworkflowMode;
   body: string;
 }
 
@@ -108,7 +176,7 @@ export function parseFrontmatter(fileContent: string): ParsedFrontmatter {
   const match = fileContent.match(frontmatterRegex);
 
   if (!match) {
-    return { aliases: [], tags: [], agents: [], description: '', autoworkflow: false, body: fileContent };
+    return { aliases: [], tags: [], agents: [], description: '', autoworkflow: 'false', body: fileContent };
   }
 
   const yaml = match[1];
@@ -118,17 +186,21 @@ export function parseFrontmatter(fileContent: string): ParsedFrontmatter {
     ...parseArrayField(yaml, 'aliases'),
     ...parseArrayField(yaml, 'shortcuts')
   ];
-  const tags = parseArrayField(yaml, 'tags');
+  const tags = parseTagsField(yaml);
   const agents = parseArrayField(yaml, 'agents');
 
   const descMatch = yaml.match(/^description:\s*(.*)$/m);
   const description = descMatch ? descMatch[1].trim().replace(/^['"]|['"]$/g, '') : '';
 
   const autoMatch = yaml.match(/^autoworkflow:\s*(.*)$/m);
-  let autoworkflow = false;
+  let autoworkflow: AutoworkflowMode = 'false';
   if (autoMatch) {
     const val = autoMatch[1].trim().toLowerCase();
-    autoworkflow = val === 'true' || val === 'yes';
+    if (val === 'true' || val === 'yes') {
+      autoworkflow = 'true';
+    } else if (val === 'hintforuser' || val === 'hint') {
+      autoworkflow = 'hintForUser';
+    }
   }
 
   return { aliases, tags, agents, description, autoworkflow, body };

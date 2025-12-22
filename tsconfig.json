@@ -11,6 +11,6 @@
     "declaration": true,
     "types": ["bun", "node"]
   },
-  "include": ["src/**/*"],
+  "include": ["src/**/*", "src/**/*.svelte"],
   "exclude": ["node_modules", "dist"]
 }
