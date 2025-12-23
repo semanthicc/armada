@@ -11,8 +11,12 @@ import {
   parseTagsField,
   formatSuggestion,
   expandVariables,
-  BUILTIN_VARIABLES
-} from '../src/core';
+  expandOrphanWorkflowRefs,
+  extractWorkflowReferences,
+  BUILTIN_VARIABLES,
+  findMatchingAutoWorkflows,
+  isOrGroup
+} from '../src/engine';
 
 describe('normalize', () => {
   test('strips hyphens', () => {
@@ -255,6 +259,17 @@ describe('detectWorkflowMentions', () => {
     const result = detectWorkflowMentions('//review(src/index.ts)!');
     expect(result).toEqual([{ name: 'review', force: true, args: { _: 'src/index.ts' } }]);
   });
+
+  test('ZWSP: does NOT detect //\\u200B as workflow mention (zero-width space prevents expansion)', () => {
+    // This is used in auto-apply hints to prevent self-expansion
+    const result = detectWorkflowMentions('Check out //\u200B5-approaches for ideas');
+    expect(result).toEqual([]);
+  });
+
+  test('ZWSP: multiple ZWSP-protected mentions are ignored', () => {
+    const result = detectWorkflowMentions('//\u200Bfoo and //\u200Bbar but also //real-one');
+    expect(result).toEqual([{ name: 'real-one', force: false, args: {} }]);
+  });
 });
 
 describe('parseWorkflowArgs', () => {
@@ -412,6 +427,29 @@ describe('parseTagsField', () => {
       'commit'
     ]);
   });
+
+  test('parses OR inside AND group: [validate|inspect, changes]', () => {
+    const result = parseTagsField('tags: [[validate|inspect, changes]]');
+    expect(result).toEqual([
+      [{ or: ['validate', 'inspect'] }, 'changes']
+    ]);
+  });
+
+  test('parses multiple OR inside AND group', () => {
+    const result = parseTagsField('tags: [[foo|bar, baz|qux]]');
+    expect(result).toEqual([
+      [{ or: ['foo', 'bar'] }, { or: ['baz', 'qux'] }]
+    ]);
+  });
+
+  test('complex: OR-in-AND mixed with simple tags', () => {
+    const result = parseTagsField('tags: [simple, [validate|inspect, changes], another]');
+    expect(result).toEqual([
+      'simple',
+      [{ or: ['validate', 'inspect'] }, 'changes'],
+      'another'
+    ]);
+  });
 });
 
 describe('parseFrontmatter', () => {
@@ -529,6 +567,56 @@ body`;
 
     const result = parseFrontmatter(content);
     expect(result.tags).toEqual(['commit', ['staged', 'changes'], 'review']);
+  });
+
+  test('workflowInWorkflow defaults to false', () => {
+    const content = `---
+description: test
+---
+body`;
+
+    const result = parseFrontmatter(content);
+    expect(result.workflowInWorkflow).toBe('false');
+  });
+
+  test('workflowInWorkflow: true', () => {
+    const content = `---
+workflowInWorkflow: true
+---
+body`;
+
+    const result = parseFrontmatter(content);
+    expect(result.workflowInWorkflow).toBe('true');
+  });
+
+  test('workflowInWorkflow: hints', () => {
+    const content = `---
+workflowInWorkflow: hints
+---
+body`;
+
+    const result = parseFrontmatter(content);
+    expect(result.workflowInWorkflow).toBe('hints');
+  });
+
+  test('workflowInWorkflow: hint (alias for hints)', () => {
+    const content = `---
+workflowInWorkflow: hint
+---
+body`;
+
+    const result = parseFrontmatter(content);
+    expect(result.workflowInWorkflow).toBe('hints');
+  });
+
+  test('workflowInWorkflow: false explicit', () => {
+    const content = `---
+workflowInWorkflow: false
+---
+body`;
+
+    const result = parseFrontmatter(content);
+    expect(result.workflowInWorkflow).toBe('false');
   });
 });
 
@@ -657,6 +745,331 @@ describe('expandVariables', () => {
     test('has NOW resolver', () => {
       expect(BUILTIN_VARIABLES.NOW).toBeDefined();
       expect(typeof BUILTIN_VARIABLES.NOW()).toBe('string');
+    });
+  });
+});
+
+describe('expandOrphanWorkflowRefs', () => {
+  test('expands orphan [use_workflow:] reference with variable replacement', () => {
+    const workflows = new Map([
+      ['patchlog', {
+        name: 'patchlog',
+        content: 'Date: {{TODAY}}, Time: {{NOW}}',
+        source: 'global' as const
+      }]
+    ]);
+    
+    const text = 'Here is the workflow: [use_workflow:patchlog-abc1]';
+    const result = expandOrphanWorkflowRefs(text, workflows, {}, () => 'test');
+    
+    expect(result.expandedRefs).toContain('patchlog');
+    expect(result.expanded).toContain('<workflow name="patchlog"');
+    expect(result.expanded).not.toContain('{{TODAY}}');
+    expect(result.expanded).not.toContain('{{NOW}}');
+  });
+
+  test('does not expand if full workflow already exists in text', () => {
+    const workflows = new Map([
+      ['patchlog', {
+        name: 'patchlog',
+        content: 'Content here',
+        source: 'global' as const
+      }]
+    ]);
+    
+    const text = '<workflow name="patchlog">existing</workflow> and [use_workflow:patchlog-abc1]';
+    const result = expandOrphanWorkflowRefs(text, workflows);
+    
+    expect(result.expandedRefs).toEqual([]);
+    expect(result.expanded).toBe(text);
+  });
+
+  test('expands multiple orphan references', () => {
+    const workflows = new Map([
+      ['foo', { name: 'foo', content: 'Foo: {{TODAY}}', source: 'global' as const }],
+      ['bar', { name: 'bar', content: 'Bar: {{TODAY}}', source: 'project' as const }]
+    ]);
+    
+    const text = '[use_workflow:foo-111] and [use_workflow:bar-222]';
+    const result = expandOrphanWorkflowRefs(text, workflows, {}, () => 'id');
+    
+    expect(result.expandedRefs).toContain('foo');
+    expect(result.expandedRefs).toContain('bar');
+    expect(result.expanded).toContain('<workflow name="foo"');
+    expect(result.expanded).toContain('<workflow name="bar"');
+    expect(result.expanded).not.toContain('{{TODAY}}');
+  });
+
+  test('uses custom context variables', () => {
+    const workflows = new Map([
+      ['test', {
+        name: 'test',
+        content: 'Project: {{PROJECT}}, Branch: {{BRANCH}}',
+        source: 'global' as const
+      }]
+    ]);
+    
+    const text = '[use_workflow:test-xyz]';
+    const result = expandOrphanWorkflowRefs(text, workflows, {
+      PROJECT: () => 'my-project',
+      BRANCH: () => 'main'
+    });
+    
+    expect(result.expanded).toContain('Project: my-project');
+    expect(result.expanded).toContain('Branch: main');
+  });
+});
+
+describe('findMatchingAutoWorkflows', () => {
+  const { findMatchingAutoWorkflows } = require('../src/engine');
+
+  const patchlogWorkflow = {
+    name: 'patchlog',
+    aliases: ['patchnote'],
+    tags: [['patchlog', 'commit']],
+    agents: [],
+    description: 'Generate a structured patchlog entry for documentation',
+    autoworkflow: 'true' as const
+  };
+
+  const reviewWorkflow = {
+    name: 'code-review',
+    aliases: ['cr'],
+    tags: ['review', 'code'],
+    agents: [],
+    description: 'Review code changes',
+    autoworkflow: 'true' as const
+  };
+
+  test('matches when AND group tags all present', () => {
+    const result = findMatchingAutoWorkflows(
+      'check my patchlog and commit changes',
+      [patchlogWorkflow]
+    );
+    expect(result.autoApply).toContain('patchlog');
+  });
+
+  test('does NOT match when only one tag from AND group is present', () => {
+    const result = findMatchingAutoWorkflows(
+      'generate a patchlog for me',
+      [patchlogWorkflow]
+    );
+    expect(result.autoApply).not.toContain('patchlog');
+  });
+
+  test('does NOT match when message contains workflow name but not enough tags', () => {
+    const result = findMatchingAutoWorkflows(
+      'what is patchlog',
+      [patchlogWorkflow]
+    );
+    expect(result.autoApply).not.toContain('patchlog');
+  });
+
+  test('CRITICAL: explicit //mention should NOT trigger auto-apply for same workflow', () => {
+    const result = findMatchingAutoWorkflows(
+      '//patchlog',
+      [patchlogWorkflow],
+      undefined,
+      ['patchlog']
+    );
+    expect(result.autoApply).not.toContain('patchlog');
+  });
+
+  test('CRITICAL: explicit mention via alias should NOT trigger auto-apply', () => {
+    const result = findMatchingAutoWorkflows(
+      '//patchnote generate entry',
+      [patchlogWorkflow],
+      undefined,
+      ['patchnote']
+    );
+    expect(result.autoApply).not.toContain('patchlog');
+  });
+
+  test('matches other workflows even when one is explicitly mentioned', () => {
+    const result = findMatchingAutoWorkflows(
+      '//patchlog review my code changes',
+      [patchlogWorkflow, reviewWorkflow],
+      undefined,
+      ['patchlog']
+    );
+    expect(result.autoApply).not.toContain('patchlog');
+    expect(result.autoApply).toContain('code-review');
+  });
+
+  test('matches when 2+ single tags are present', () => {
+    const result = findMatchingAutoWorkflows(
+      'please review my code',
+      [reviewWorkflow]
+    );
+    expect(result.autoApply).toContain('code-review');
+  });
+
+  test('does NOT match when only 1 single tag is present', () => {
+    const result = findMatchingAutoWorkflows(
+      'review this',
+      [reviewWorkflow]
+    );
+    expect(result.autoApply).not.toContain('code-review');
+  });
+
+  test('BUG REGRESSION: "// patchlog" with space should NOT trigger auto-apply via name match', () => {
+    const result = findMatchingAutoWorkflows(
+      '// patchlog',
+      [patchlogWorkflow]
+    );
+    expect(result.autoApply).not.toContain('patchlog');
+  });
+
+  test('BUG REGRESSION: typo "//patchlog " should not trigger when AND group incomplete', () => {
+    const result = findMatchingAutoWorkflows(
+      '//patchlog generate docs',
+      [patchlogWorkflow],
+      undefined,
+      ['patchlog']
+    );
+    expect(result.autoApply).not.toContain('patchlog');
+  });
+
+  test('BUG REGRESSION: alias in text should NOT trigger auto-apply', () => {
+    const result = findMatchingAutoWorkflows(
+      'what is patchnote feature',
+      [patchlogWorkflow]
+    );
+    expect(result.autoApply).not.toContain('patchlog');
+  });
+
+  test('BUG REGRESSION: [use_workflow:X] reference should NOT trigger auto-apply for X', () => {
+    const result = findMatchingAutoWorkflows(
+      'patchlog commit [use_workflow:patchlog-kF0y]',
+      [patchlogWorkflow],
+      undefined,
+      ['patchlog']
+    );
+    expect(result.autoApply).not.toContain('patchlog');
+  });
+
+  test('BUG REGRESSION: <workflow name="X"> tag should NOT trigger auto-apply for X', () => {
+    const result = findMatchingAutoWorkflows(
+      'patchlog commit <workflow name="patchlog">content</workflow>',
+      [patchlogWorkflow],
+      undefined,
+      ['patchlog']
+    );
+    expect(result.autoApply).not.toContain('patchlog');
+  });
+});
+
+describe('extractWorkflowReferences', () => {
+  const { extractWorkflowReferences } = require('../src/engine');
+
+  test('extracts [use_workflow:name-id] references', () => {
+    const result = extractWorkflowReferences('[use_workflow:patchlog-kF0y]');
+    expect(result).toContain('patchlog');
+  });
+
+  test('extracts <workflow name="X"> references', () => {
+    const result = extractWorkflowReferences('<workflow name="patchlog" id="patchlog-123">content</workflow>');
+    expect(result).toContain('patchlog');
+  });
+
+  test('extracts multiple references', () => {
+    const result = extractWorkflowReferences('[use_workflow:foo-abc] and <workflow name="bar">x</workflow>');
+    expect(result).toContain('foo');
+    expect(result).toContain('bar');
+  });
+
+  test('returns empty for no references', () => {
+    const result = extractWorkflowReferences('just normal text');
+    expect(result).toEqual([]);
+  });
+
+  test('deduplicates references', () => {
+    const result = extractWorkflowReferences('[use_workflow:foo-1] [use_workflow:foo-2]');
+    expect(result).toEqual(['foo']);
+  });
+
+  test('BUG REGRESSION: Workflow name with hyphen used as ID salt (e.g. 5-approaches) should be detected', () => {
+    const weirdIdRef = '[use_workflow:5-approaches-e4v15-]';
+    const result = extractWorkflowReferences(weirdIdRef);
+    expect(result).toContain('5-approaches');
+  });
+
+  test('BUG REGRESSION: Unbracketed reference with trailing hyphen in ID should be detected', () => {
+    const unbracketedRef = 'use_workflow:5-approaches-sIqb5-';
+    const result = extractWorkflowReferences(unbracketedRef);
+    expect(result).toContain('5-approaches');
+  });
+});
+
+describe('Unicode workflow names', () => {
+  describe('detectWorkflowMentions - Unicode support', () => {
+    test('detects Cyrillic workflow name', () => {
+      const result = detectWorkflowMentions('используй //код-ревью для проверки');
+      expect(result).toEqual([{ name: 'код-ревью', force: false, args: {} }]);
+    });
+
+    test('detects Chinese workflow name', () => {
+      const result = detectWorkflowMentions('请使用 //代码审查 来检查');
+      expect(result).toEqual([{ name: '代码审查', force: false, args: {} }]);
+    });
+
+    test('detects Arabic workflow name', () => {
+      const result = detectWorkflowMentions('استخدم //مراجعة-الكود');
+      expect(result).toEqual([{ name: 'مراجعة-الكود', force: false, args: {} }]);
+    });
+
+    test('detects mixed Latin-Cyrillic workflow name', () => {
+      const result = detectWorkflowMentions('check //review-ревью now');
+      expect(result).toEqual([{ name: 'review-ревью', force: false, args: {} }]);
+    });
+
+    test('detects Unicode workflow with force suffix', () => {
+      const result = detectWorkflowMentions('//код-ревью! принудительно');
+      expect(result).toEqual([{ name: 'код-ревью', force: true, args: {} }]);
+    });
+
+    test('detects Unicode workflow with args', () => {
+      const result = detectWorkflowMentions('//ревью(file=тест.ts)');
+      expect(result).toEqual([{ name: 'ревью', force: false, args: { file: 'тест.ts' } }]);
+    });
+
+    test('detects multiple Unicode workflows', () => {
+      const result = detectWorkflowMentions('//код-ревью и //анализ-безопасности');
+      expect(result).toEqual([
+        { name: 'код-ревью', force: false, args: {} },
+        { name: 'анализ-безопасности', force: false, args: {} }
+      ]);
+    });
+
+    test('dedupes same Unicode workflow', () => {
+      const result = detectWorkflowMentions('//код потом //код снова');
+      expect(result).toEqual([{ name: 'код', force: false, args: {} }]);
+    });
+  });
+
+  describe('extractWorkflowReferences - Unicode support', () => {
+    test('extracts bracketed Unicode workflow reference', () => {
+      const result = extractWorkflowReferences('[use_workflow:код-ревью-abc123]');
+      expect(result).toContain('код-ревью');
+    });
+
+    test('extracts unbracketed Unicode workflow reference', () => {
+      const result = extractWorkflowReferences('use_workflow:代码审查-xyz789');
+      expect(result).toContain('代码审查');
+    });
+  });
+
+  describe('normalize - Unicode support', () => {
+    test('normalizes Cyrillic workflow name', () => {
+      expect(normalize('Код-Ревью')).toBe('кодревью');
+    });
+
+    test('normalizes Chinese workflow name', () => {
+      expect(normalize('代码_审查')).toBe('代码审查');
+    });
+
+    test('normalizes mixed script workflow name', () => {
+      expect(normalize('Review-Ревью_审查')).toBe('reviewревью审查');
     });
   });
 });

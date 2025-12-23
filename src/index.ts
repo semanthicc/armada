@@ -1,27 +1,33 @@
 import type { Plugin, PluginInput } from '@opencode-ai/plugin';
 import type { Part, UserMessage } from '@opencode-ai/sdk';
 import { tool } from '@opencode-ai/plugin';
+import { loadConfig, loadWorkflows, getWorkflowPath, saveWorkflow, deleteWorkflow, renameWorkflowFile, workflowExists } from './storage';
 import { existsSync, readdirSync, readFileSync, writeFileSync, unlinkSync, mkdirSync, renameSync } from 'fs';
 import { execSync } from 'child_process';
 import { join, basename } from 'path';
 import { homedir } from 'os';
-import { findBestMatch, findAllMatches, findWorkflowByName, detectWorkflowMentions, parseFrontmatter, formatSuggestion, expandVariables, VariableResolver, AutoworkflowMode, TagEntry, isOrGroup } from './core';
+import { 
+  findBestMatch, 
+  findAllMatches, 
+  findWorkflowByName, 
+  detectWorkflowMentions, 
+  parseFrontmatter, 
+  formatSuggestion, 
+  expandVariables, 
+  isOrGroup,
+  extractWorkflowReferences,
+  formatAutoApplyHint, 
+  formatUserHint,
+  shortId,
+  processMessageText,
+  expandWorkflowMentions,
+  findMatchingAutoWorkflows
+} from './engine';
+import type { VariableResolver, AutoworkflowMode, WorkflowInWorkflowMode, TagEntry } from './engine';
+import type { Workflow, WorkflowConfig, WorkflowRef } from './types';
 
-interface WorkflowInfo {
-  name: string;
-  aliases: string[];
-  tags: TagEntry[];
-  agents: string[];
-  description: string;
-  autoworkflow: AutoworkflowMode;
-  content: string;
-  source: 'project' | 'global';
-  path: string;
-}
-
-interface WorkflowConfig {
-  deduplicateSameMessage: boolean;
-}
+// WorkflowInfo is now Workflow from types.ts
+// WorkflowConfig is now imported from types.ts
 
 interface PluginEvent {
   type: string;
@@ -32,147 +38,16 @@ interface PluginEvent {
   };
 }
 
-function loadConfig(): WorkflowConfig {
-  const configDir = join(homedir(), '.config', 'opencode');
-  const configPath = join(configDir, 'workflows.json');
-  
-  try {
-    if (!existsSync(configDir)) {
-      mkdirSync(configDir, { recursive: true });
-    }
+// loadConfig, loadWorkflows, getWorkflowPath are now imported from storage.ts
 
-    if (!existsSync(configPath)) {
-      const defaultConfig: WorkflowConfig = { deduplicateSameMessage: true };
-      writeFileSync(configPath, JSON.stringify(defaultConfig, null, 2), 'utf-8');
-      return defaultConfig;
-    }
+const sessionWorkflows = new Map<string, Map<string, WorkflowRef>>();
+const processedAutoApply = new Set<string>();
 
-    const content = readFileSync(configPath, 'utf-8');
-    const json = JSON.parse(content);
-    return {
-      deduplicateSameMessage: json.deduplicateSameMessage ?? true
-    };
-  } catch {}
-  return { deduplicateSameMessage: true };
-}
+// shortId is now imported from engine.ts
 
-function getWorkflowDirs(projectDir: string): { path: string; source: 'project' | 'global' }[] {
-  const dirs: { path: string; source: 'project' | 'global' }[] = [];
+// NestedExpansionResult and expandNestedWorkflows are now imported from engine.ts
 
-  const projectWorkflows = join(projectDir, '.opencode', 'workflows');
-  if (existsSync(projectWorkflows)) {
-    dirs.push({ path: projectWorkflows, source: 'project' });
-  }
-
-  const globalWorkflows = join(homedir(), '.config', 'opencode', 'workflows');
-  if (existsSync(globalWorkflows)) {
-    dirs.push({ path: globalWorkflows, source: 'global' });
-  }
-
-  return dirs;
-}
-
-function getWorkflowPath(name: string, scope: 'project' | 'global', projectDir: string): string {
-  const safeName = name.replace(/[^a-zA-Z0-9_-]/g, '');
-  if (!safeName) throw new Error(`Invalid workflow name: ${name}`);
-
-  let dir: string;
-  if (scope === 'project') {
-    dir = join(projectDir, '.opencode', 'workflows');
-  } else {
-    dir = join(homedir(), '.config', 'opencode', 'workflows');
-  }
-
-  if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true });
-  }
-
-  return join(dir, `${safeName}.md`);
-}
-
-function loadWorkflows(projectDir: string): Map<string, WorkflowInfo> {
-  const workflows = new Map<string, WorkflowInfo>();
-  const dirs = getWorkflowDirs(projectDir);
-
-  for (const { path: dir, source } of dirs) {
-    try {
-      const files = readdirSync(dir).filter((f: string) => f.endsWith('.md'));
-      for (const file of files) {
-        const name = basename(file, '.md');
-        if (!workflows.has(name)) {
-          const filePath = join(dir, file);
-          const rawContent = readFileSync(filePath, 'utf-8');
-          const { aliases, tags, agents, description, autoworkflow, body } = parseFrontmatter(rawContent);
-          
-          const info: WorkflowInfo = { name, aliases, tags, agents, description, autoworkflow, content: body, source, path: filePath };
-          workflows.set(name, info);
-          
-          aliases.forEach(alias => {
-            if (!workflows.has(alias)) {
-              workflows.set(alias, info);
-            }
-          });
-        }
-      }
-    } catch {
-    }
-  }
-
-  return workflows;
-}
-
-const sessionWorkflows = new Map<string, Map<string, { id: string; messageID: string }>>();
-
-function shortId(messageID: string): string {
-  if (messageID && messageID.length >= 4) {
-    return messageID.slice(-4);
-  }
-  return Math.random().toString(36).slice(2, 6);
-}
-
-function expandWorkflowMentions(
-  text: string,
-  workflows: Map<string, WorkflowInfo>,
-  config: WorkflowConfig
-): { expanded: string; found: string[]; notFound: string[]; suggestions: Map<string, string> } {
-  const mentions = detectWorkflowMentions(text);
-  const found: string[] = [];
-  const notFound: string[] = [];
-  const suggestions = new Map<string, string>();
-  let expanded = text;
-
-  for (const { name, force, args } of mentions) {
-    const workflow = workflows.get(name);
-    if (workflow) {
-      found.push(name);
-      
-      const mentionPatternStr = args && Object.keys(args).length > 0
-        ? `(?<![:\\\\w/])//${name}\\([^)]*\\)!?(?![\\\\w-])`
-        : `(?<![:\\\\w/])//${name}!?(?![\\\\w-])`;
-
-      const fullContent = `\n\n<workflow name="${name}" source="${workflow.source}">\n${workflow.content}\n</workflow>\n\n`;
-
-      if (config.deduplicateSameMessage) {
-        const firstPattern = new RegExp(mentionPatternStr);
-        expanded = expanded.replace(firstPattern, fullContent);
-
-        const remainingPattern = new RegExp(mentionPatternStr, 'g');
-        expanded = expanded.replace(remainingPattern, `[use_workflow:${name}]`);
-      } else {
-        const globalPattern = new RegExp(mentionPatternStr, 'g');
-        expanded = expanded.replace(globalPattern, fullContent);
-      }
-    } else {
-      notFound.push(name);
-      const match = findBestMatch(name, [...workflows.keys()]);
-      if (match) {
-        suggestions.set(name, match);
-      }
-    }
-  }
-
-  return { expanded, found, notFound, suggestions };
-}
+// expandWorkflowMentions is now imported from engine.ts
 
 const DISTINCTION_RULE = `
 <system-rule>
@@ -237,6 +112,9 @@ export const WorkflowsPlugin: Plugin = async (ctx: PluginInput) => {
         output.system.push(DISTINCTION_RULE);
       }
 
+      const hasCatalog = output.system.some(s => s.includes("<workflow-catalog"));
+      if (hasCatalog) return;
+
       const activeAgent = input.agent;
       const catalogEntries = [...workflows.values()]
         .filter(w => w.autoworkflow === 'true' || w.autoworkflow === 'hintForUser')
@@ -283,181 +161,99 @@ export const WorkflowsPlugin: Plugin = async (ctx: PluginInput) => {
         workflows = loadWorkflows(directory);
         config = loadConfig();
         const sessionID = _input.sessionID;
-        const messageID = _input.messageID || '';
+        const messageID = output.message.id;
 
         if (!sessionWorkflows.has(sessionID)) {
           sessionWorkflows.set(sessionID, new Map());
         }
         const workflowRefs = sessionWorkflows.get(sessionID)!;
 
+        // Global scan: Check ALL parts for mentions first.
+        // If the user mentioned a workflow ANYWHERE in this message, we should NOT be offering auto-apply hints.
+        const hasGlobalMentions = output.parts.some(
+          (p: { type: string; text?: string }) =>
+            p.type === "text" && p.text && detectWorkflowMentions(p.text).length > 0
+        );
+
+        const textParts = output.parts.filter(p => p.type === "text" && "text" in p);
+        const lastTextPart = textParts[textParts.length - 1];
+
         for (const part of output.parts) {
           if (part.type === "text" && "text" in part) {
             const textPart = part as { type: "text"; text: string };
             const mentions = detectWorkflowMentions(textPart.text);
 
-            if (mentions.length === 0) {
-              const activeAgent = _input.agent;
-              const userContent = textPart.text.toLowerCase();
-
-              const matchingWorkflows = [...workflows.values()]
-                .filter(w => w.autoworkflow === 'true' || w.autoworkflow === 'hintForUser')
-                .filter(w => w.agents.length === 0 || (activeAgent && w.agents.includes(activeAgent)))
-                .filter(w => {
-                  let singleMatches = 0;
-                  let groupMatched = false;
-                  
-                  for (const tag of w.tags) {
-                    if (Array.isArray(tag)) {
-                      // AND group: all words must match
-                      const allInGroup = tag.every(t => userContent.includes(t.toLowerCase()));
-                      if (allInGroup && tag.length > 0) {
-                        groupMatched = true;
-                      }
-                    } else if (isOrGroup(tag)) {
-                      // OR group: any word matches counts as 1 single match
-                      if (tag.or.some(t => userContent.includes(t.toLowerCase()))) {
-                        singleMatches++;
-                      }
-                    } else {
-                      // Single tag
-                      if (userContent.includes(tag.toLowerCase())) {
-                        singleMatches++;
-                      }
-                    }
-                  }
-                  
-                  const matchesDesc = w.description && userContent.includes(w.description.toLowerCase().slice(0, 20));
-                  const matchesAlias = w.aliases.some(a => userContent.includes(a.toLowerCase()));
-                  const matchesName = userContent.includes(w.name.toLowerCase());
-                  
-                  return groupMatched || singleMatches >= 2 || matchesDesc || matchesAlias || matchesName;
-                })
-                .filter((w, idx, arr) => arr.findIndex(x => x.name === w.name) === idx);
-
-              const autoApply = matchingWorkflows
-                .filter(w => w.autoworkflow === 'true')
-                .map(w => `//${w.name} — "${w.description || 'No description'}"`);
+            // Only run auto-apply logic if there are NO mentions in the ENTIRE message, not just this part.
+            // AND only for the last text part to avoid duplicate hints.
+            if (mentions.length === 0 && !hasGlobalMentions && part === lastTextPart) {
+              if (processedAutoApply.has(messageID)) continue;
               
-              const userHints = matchingWorkflows
-                .filter(w => w.autoworkflow === 'hintForUser')
-                .map(w => `//${w.name} — "${w.description || 'No description'}"`);
+              const activeAgent = _input.agent;
+              const alreadyReferenced = extractWorkflowReferences(textPart.text);
+
+              const { autoApply, userHints } = findMatchingAutoWorkflows(
+                textPart.text,
+                [...workflows.values()],
+                activeAgent,
+                alreadyReferenced
+              );
 
               if (autoApply.length > 0) {
-                textPart.text += `\n\n[Auto-apply workflows: ${autoApply.join('; ')} — if relevant, use get_workflow("name") to fetch and apply]`;
+                const descriptions = new Map(autoApply.map(name => {
+                  const w = workflows.get(name);
+                  return [name, w?.description || 'No description'] as [string, string];
+                }));
+                textPart.text += `\n\n${formatAutoApplyHint(autoApply, descriptions)}`;
+                processedAutoApply.add(messageID);
               }
               if (userHints.length > 0) {
-                textPart.text += `\n\n[Suggested workflows: ${userHints.join('; ')}]`;
+                const descriptions = new Map(userHints.map(name => {
+                  const w = workflows.get(name);
+                  return [name, w?.description || 'No description'] as [string, string];
+                }));
+                textPart.text += `\n\n${formatUserHint(userHints, descriptions)}`;
+                processedAutoApply.add(messageID);
               }
               continue;
             }
 
-            const found: string[] = [];
-            const reused: string[] = [];
-            const notFound: string[] = [];
-            const suggestions = new Map<string, string[]>();
-            let expanded = textPart.text;
+                        // Use the pure engine logic to process the text
+            const engineResult = processMessageText(
+              textPart.text,
+              workflows,
+              workflowRefs,
+              messageID,
+              contextVariables,
+              config
+            );
 
-            for (const { name, force, args } of mentions) {
-              const canonicalName = findWorkflowByName(name, [...workflows.keys()]);
-              const workflow = canonicalName ? workflows.get(canonicalName) : null;
-              
-              if (!workflow || !canonicalName) {
-                notFound.push(name);
-                const matches = findAllMatches(name, [...workflows.keys()], 3);
-                if (matches.length > 0) suggestions.set(name, matches);
-                continue;
-              }
-
-              const existingRef = workflowRefs.get(canonicalName);
-              const shouldFullInject = force || !existingRef;
-
-              if (shouldFullInject) {
-                const id = shortId(messageID);
-                workflowRefs.set(canonicalName, { id, messageID });
-                found.push(canonicalName);
-                
-                const argsAsResolvers: Record<string, VariableResolver> = {};
-                for (const [key, value] of Object.entries(args)) {
-                  argsAsResolvers[`args.${key}`] = () => value;
-                }
-                
-                const expandedContent = expandVariables(workflow.content, { ...contextVariables, ...argsAsResolvers });
-                
-                const mentionPatternStr = args && Object.keys(args).length > 0
-                  ? `(?<![:\\\\w/])//${name}\\([^)]*\\)!?(?![\\\\w-])`
-                  : `(?<![:\\\\w/])//${name}!?(?![\\\\w-])`;
-                
-                const fullContent = `\n\n<workflow name="${canonicalName}" id="${canonicalName}-${id}" source="${workflow.source}">\n${expandedContent}\n</workflow>\n\n`;
-
-                if (config.deduplicateSameMessage) {
-                  const firstPattern = new RegExp(mentionPatternStr);
-                  expanded = expanded.replace(firstPattern, fullContent);
-
-                  const remainingPattern = new RegExp(mentionPatternStr, 'g');
-                  if (remainingPattern.test(expanded)) {
-                    expanded = expanded.replace(
-                      remainingPattern,
-                      `[use_workflow:${canonicalName}-${id}]`
-                    );
-                    if (!reused.includes(canonicalName)) {
-                      reused.push(canonicalName);
-                    }
-                  }
-                } else {
-                  const globalPattern = new RegExp(mentionPatternStr, 'g');
-                  expanded = expanded.replace(globalPattern, fullContent);
-                }
-              } else {
-                reused.push(canonicalName);
-                expanded = expanded.replace(
-                  new RegExp(`(?<![:\\\\w/])//${name}(?![\\\\w-])`, 'g'),
-                  `[use_workflow:${canonicalName}-${existingRef.id}]`
-                );
-              }
+            // Update state with new references returned by engine
+            for (const [name, ref] of engineResult.newRefs) {
+              workflowRefs.set(name, ref);
             }
+            
+            if (engineResult.found.length === 0 && engineResult.reused.length === 0 && engineResult.notFound.length === 0) continue;
 
-            const useWorkflowPattern = /\[use_workflow:([a-zA-Z0-9_-]+)-[a-zA-Z0-9]+\]/g;
-            let refMatch;
-            while ((refMatch = useWorkflowPattern.exec(expanded)) !== null) {
-              const refName = refMatch[1];
-              const hasFullExpansion = expanded.includes(`<workflow name="${refName}"`);
-              if (!hasFullExpansion) {
-                const workflow = workflows.get(refName);
-                if (workflow) {
-                  const id = shortId(messageID);
-                  workflowRefs.set(refName, { id, messageID });
-                  if (!found.includes(refName)) {
-                    found.push(refName);
-                  }
-                  const idx = reused.indexOf(refName);
-                  if (idx !== -1) {
-                    reused.splice(idx, 1);
-                  }
-                  
-                  const fullContent = `\n\n<workflow name="${refName}" id="${refName}-${id}" source="${workflow.source}">\n${workflow.content}\n</workflow>\n\n`;
-                  expanded = expanded.replace(refMatch[0], fullContent);
-                  useWorkflowPattern.lastIndex = 0;
-                }
-              }
+            textPart.text = engineResult.text;
+
+            // Display warnings
+            if (engineResult.warnings.length > 0) {
+              showToast(ctx, engineResult.warnings.join('\n'), 'warning', 'Workflow Nesting');
             }
-
-            if (found.length === 0 && reused.length === 0 && notFound.length === 0) continue;
-
-            textPart.text = expanded;
 
             const toastParts: string[] = [];
             let toastVariant: "success" | "info" | "warning" = "success";
 
-            if (found.length > 0) {
-              toastParts.push(`✓ Expanded: ${found.join(', ')}`);
+            if (engineResult.found.length > 0) {
+              toastParts.push(`✓ Expanded: ${engineResult.found.join(', ')}`);
             }
-            if (reused.length > 0) {
-              toastParts.push(`↺ Referenced: ${reused.join(', ')}`);
-              if (toastVariant === "success" && found.length === 0) toastVariant = "info";
+            if (engineResult.reused.length > 0) {
+              toastParts.push(`↺ Referenced: ${engineResult.reused.join(', ')}`);
+              if (toastVariant === "success" && engineResult.found.length === 0) toastVariant = "info";
             }
-            if (notFound.length > 0) {
+            if (engineResult.notFound.length > 0) {
               toastVariant = "warning";
-              const suggestionMsg = [...suggestions.entries()]
+              const suggestionMsg = [...engineResult.suggestions.entries()]
                 .map(([typo, matches]) => {
                   const formatted = matches.map(match => {
                     const wf = workflows.get(match);
@@ -470,7 +266,7 @@ export const WorkflowsPlugin: Plugin = async (ctx: PluginInput) => {
               if (suggestionMsg) {
                 toastParts.push(`? Did you mean: ${suggestionMsg}`);
               } else {
-                toastParts.push(`✗ Not found: ${notFound.join(', ')}`);
+                toastParts.push(`✗ Not found: ${engineResult.notFound.join(', ')}`);
               }
             }
 
@@ -704,4 +500,4 @@ export const WorkflowsPlugin: Plugin = async (ctx: PluginInput) => {
   };
 };
 
-export { loadConfig, expandWorkflowMentions, WorkflowConfig, WorkflowInfo };
+export default WorkflowsPlugin;
