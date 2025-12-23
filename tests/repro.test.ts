@@ -11,20 +11,20 @@ describe('Reproduction Tests', () => {
 
   test('shortId with 5-approaches as salt', () => {
     const id = shortId('msg1234', '5-approaches');
-    // "5-approaches" -> "5approaches" -> "5a"
-    // msg "msg1234" -> "1234"
-    // Result: "12345a"
-    expect(id).toBe('12345a');
+    // New algorithm: djb2 hash of "msg1234:5-approaches:" -> base36
+    expect(id).toMatch(/^[a-z0-9]+$/);
     expect(id).not.toContain('-');
+    // Deterministic: same inputs always produce same output
+    expect(shortId('msg1234', '5-approaches')).toBe(id);
   });
 
   test('shortId with messageID ending in hyphen', () => {
     const id = shortId('msg-123-', '5-approaches');
-    // Clean first: "msg-123-" -> "msg123" -> slice(-4) -> "g123"
-    // Salt: "5-approaches" -> "5approaches" -> slice(0,2) -> "5a"
-    // Result: "g1235a"
-    expect(id).toBe('g1235a');
+    // New algorithm: djb2 hash preserves all input characters
+    expect(id).toMatch(/^[a-z0-9]+$/);
     expect(id).not.toContain('-');
+    // Different input produces different output
+    expect(id).not.toBe(shortId('msg1234', '5-approaches'));
   });
 
 });

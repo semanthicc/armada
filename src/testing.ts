@@ -117,7 +117,7 @@ export function processWorkflowMentionsForSession(
     const shouldFullInject = force || !existingRef || existingRef.implicit;
 
     if (shouldFullInject) {
-      const id = shortId(messageID, canonicalName);
+      const id = shortId(messageID, canonicalName, []);
       workflowRefs.set(canonicalName, { id, messageID, implicit: false });
       found.push(canonicalName);
 
@@ -147,7 +147,7 @@ export function processWorkflowMentionsForSession(
     }
   }
 
-  const useWorkflowPattern = /\[use_workflow:([a-zA-Z0-9_-]+)-[a-zA-Z0-9]+\]/g;
+  const useWorkflowPattern = /\[use_workflow:([\p{L}\p{N}_-]+)-[a-z0-9]+\]/gu;
   let refMatch;
   while ((refMatch = useWorkflowPattern.exec(expanded)) !== null) {
     const refName = refMatch[1];
@@ -160,7 +160,7 @@ export function processWorkflowMentionsForSession(
       
       const workflow = workflowsMap.get(refName);
       if (workflow) {
-        const id = shortId(messageID, refName);
+        const id = shortId(messageID, refName, []);
         workflowRefs.set(refName, { id, messageID, implicit: true });
         if (!found.includes(refName)) {
           found.push(refName);

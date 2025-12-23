@@ -8,18 +8,18 @@ describe('Bug Fixes Regression Tests', () => {
     test('strips hyphens from salt before slicing', () => {
       const id = shortId('msg1234', '5-approaches');
       expect(id.endsWith('-')).toBe(false);
-      expect(id).toMatch(/^[a-zA-Z0-9]+$/);
+      expect(id).toMatch(/^[a-z0-9]+$/);
     });
 
     test('handles messageID ending with special chars', () => {
       const id = shortId('msg-01-', 'test');
-      expect(id).toMatch(/^[a-zA-Z0-9]+$/);
+      expect(id).toMatch(/^[a-z0-9]+$/);
     });
 
     test('never returns empty string (would cause trailing hyphen in ID)', () => {
       const id = shortId('----', '');
       expect(id.length).toBeGreaterThan(0);
-      expect(id).toMatch(/^[a-zA-Z0-9]+$/);
+      expect(id).toMatch(/^[a-z0-9]+$/);
     });
 
     test('handles messageID with only special chars and empty salt', () => {
@@ -143,6 +143,57 @@ describe('Bug Fixes Regression Tests', () => {
       
       const hintCount = (textContent.match(/\[Auto-apply workflow/g) || []).length;
       expect(hintCount).toBe(1);
+    });
+  });
+
+  describe('Bug 5: Nested workflows get duplicate IDs', () => {
+    test('shortId generates unique IDs for same workflow at different nesting depths', () => {
+      const id1 = shortId('msg1234', 'patchlog', []);
+      const id2 = shortId('msg1234', 'patchlog', ['parent-workflow']);
+      
+      expect(id1).not.toBe(id2);
+    });
+
+    test('shortId generates unique IDs for workflows with same 2-char prefix', () => {
+      const id1 = shortId('msg1234', 'patch-review');
+      const id2 = shortId('msg1234', 'patchlog');
+      
+      expect(id1).not.toBe(id2);
+    });
+
+    test('shortId generates unique IDs for sibling nested workflows', () => {
+      const chain = ['parent-workflow'];
+      const id1 = shortId('msg1234', '5-approaches', chain);
+      const id2 = shortId('msg1234', 'patchlog', chain);
+      
+      expect(id1).not.toBe(id2);
+    });
+  });
+
+  describe('Bug 6: Unicode workflow names not supported', () => {
+    test('shortId handles Cyrillic workflow names', () => {
+      const id = shortId('msg1234', 'проверка-кода');
+      expect(id.length).toBeGreaterThan(0);
+      expect(id).toMatch(/^[a-z0-9]+$/);
+    });
+
+    test('shortId handles Chinese workflow names', () => {
+      const id = shortId('msg1234', '代码审查');
+      expect(id.length).toBeGreaterThan(0);
+      expect(id).toMatch(/^[a-z0-9]+$/);
+    });
+
+    test('shortId handles mixed unicode and ASCII', () => {
+      const id = shortId('msg1234', 'review-проверка-review');
+      expect(id.length).toBeGreaterThan(0);
+      expect(id).toMatch(/^[a-z0-9]+$/);
+    });
+
+    test('different unicode names produce different IDs', () => {
+      const id1 = shortId('msg1234', 'проверка');
+      const id2 = shortId('msg1234', '检查');
+      
+      expect(id1).not.toBe(id2);
     });
   });
 

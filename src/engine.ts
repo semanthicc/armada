@@ -406,16 +406,21 @@ export function extractWorkflowReferences(text: string): string[] {
   return [...refs];
 }
 
-export function shortId(messageID: string, salt: string = ''): string {
-  if (messageID && messageID.length >= 4) {
-    const cleanMsg = messageID.replace(/[^a-zA-Z0-9]/g, '');
-    const cleanSalt = salt.replace(/[^a-zA-Z0-9]/g, '');
-    const msgPart = cleanMsg.slice(-4);
-    const saltPart = cleanSalt.slice(0, 2);
-    const result = msgPart + saltPart;
-    if (result.length > 0) return result;
+export function shortId(messageID: string, salt: string = '', expansionChain: string[] = []): string {
+  // Combine all context into a single string for hashing
+  // This guarantees uniqueness: same workflow at different depths = different ID
+  const chainKey = expansionChain.join('/');
+  const input = `${messageID}:${salt}:${chainKey}`;
+  
+  // djb2 hash - simple, fast, handles unicode via charCodeAt
+  let hash = 5381;
+  for (let i = 0; i < input.length; i++) {
+    hash = ((hash << 5) + hash) ^ input.charCodeAt(i);
+    hash = hash >>> 0; // Convert to unsigned 32-bit
   }
-  return Math.random().toString(36).slice(2, 6);
+  
+  // Convert to base36 for compact alphanumeric representation
+  return hash.toString(36);
 }
 
 export function formatAutoApplyHint(workflowNames: string[], descriptions: Map<string, string>): string {
@@ -506,7 +511,7 @@ export function expandNestedWorkflows(
       continue;
     }
 
-    const id = shortId(messageID, canonicalName);
+    const id = shortId(messageID, canonicalName, expansionChain);
     const newRef: WorkflowRef = { id, messageID, implicit: false };
     result.newRefs.set(canonicalName, newRef);
     allRefs.set(canonicalName, newRef); // Update lookup map
@@ -619,7 +624,7 @@ export function processMessageText(
     const shouldFullInject = force || !existingRef || existingRef.implicit;
 
     if (shouldFullInject) {
-      const id = shortId(messageID, canonicalName);
+      const id = shortId(messageID, canonicalName, []);
       const newRef: WorkflowRef = { id, messageID, implicit: false };
       result.newRefs.set(canonicalName, newRef);
       allRefs.set(canonicalName, newRef);
@@ -690,7 +695,7 @@ export function processMessageText(
       
       const workflow = workflows.get(refName);
       if (workflow) {
-        const id = shortId(messageID, refName);
+        const id = shortId(messageID, refName, []);
         const newRef: WorkflowRef = { id, messageID, implicit: true };
         result.newRefs.set(refName, newRef);
         allRefs.set(refName, newRef);

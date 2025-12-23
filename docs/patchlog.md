@@ -1,5 +1,37 @@
 # Patchlog
 
+## [1.3.1] - 2025-12-24
+
+### Fixed
+- Nested workflows now generate unique IDs (previously workflows with same 2-char prefix produced duplicate IDs)
+- Unicode workflow names fully supported (Cyrillic, Chinese, etc. no longer stripped)
+
+### Changed
+- ID generation uses djb2 hash algorithm instead of string slicing
+- Workflow name patterns now use unicode property escapes (`\p{L}\p{N}`)
+
+
+## [1.3.0] - 2025-12-23
+
+### Added
+- Nested workflow expansion via `workflowInWorkflow` frontmatter option (`true` | `hints` | `false`)
+- Architecture documentation (`docs/architecture.md`)
+- Testing utilities module for easier test authoring
+- Regression test suite
+
+### Changed
+- Restructured codebase: split `core.ts` into `types.ts`, `engine.ts`, `storage.ts`
+- Pure logic now isolated in `engine.ts` (no filesystem imports)
+- All I/O operations consolidated in `storage.ts`
+- `index.ts` reduced to plugin glue layer only
+
+### Fixed
+- Silent error swallowing replaced with proper error logging in config/workflow loading
+
+### Removed
+- Unused `svelte.config.js`
+
+
 ## [1.2.4] - 2025-12-23
 
 ### Added

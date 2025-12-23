@@ -48,7 +48,7 @@ export function getWorkflowDirs(projectDir: string): { path: string; source: 'pr
 }
 
 export function getWorkflowPath(name: string, scope: 'project' | 'global', projectDir: string): string {
-  const safeName = name.replace(/[^a-zA-Z0-9_-]/g, '');
+  const safeName = name.replace(/[^\p{L}\p{N}_-]/gu, '');
   if (!safeName) throw new Error(`Invalid workflow name: ${name}`);
 
   let dir: string;
