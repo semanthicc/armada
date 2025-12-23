@@ -463,7 +463,9 @@ export function expandNestedWorkflows(
     newRefs: new Map()
   };
 
-  if (parentWorkflow.workflowInWorkflow === 'false') {
+  // Inverted logic: Default to NO expansion unless explicitly enabled.
+  // This catches undefined, null, 'false', or missing keys safely.
+  if (parentWorkflow.workflowInWorkflow !== 'true' && parentWorkflow.workflowInWorkflow !== 'hints') {
     return result;
   }
 
