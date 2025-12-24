@@ -1,5 +1,19 @@
 # Patchlog
 
+## [1.4.1] - 2025-12-24
+
+### Added
+- Recursive workflow loading from subfolders - organize workflows in directories like `security/`, `review/`
+- Filter parameters for `list_workflows`: filter by `tag`, `name`, `folder`, or `scope`
+- Folder metadata displayed in `list_workflows` and `get_workflow` output
+
+### Changed
+- Autoworkflow hints now wrapped in `[]` brackets for better parsing by AI
+
+### Fixed
+- Copy/paste of workflow names from hints now works correctly (removed invisible zero-width space characters)
+
+
 ## [1.4.0] - 2025-12-24
 
 ### Added
