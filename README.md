@@ -37,22 +37,24 @@ The plugin automatically:
 
 ## Smart Auto-Suggestions
 
-Workflows with `autoworkflow` enabled can be automatically suggested based on your message content.
+Workflows with `automention` enabled can be automatically suggested based on your message content.
 
-### Autoworkflow Modes
+### Automention Modes
 
 | Mode | YAML Value | Behavior |
 |------|------------|----------|
-| **Auto-apply** | `autoworkflow: true` | AI fetches and applies the workflow automatically if relevant |
-| **User decides** | `autoworkflow: hintForUser` | AI shows a suggestion, user decides whether to use it |
-| **Disabled** | `autoworkflow: false` | No auto-suggestion (default) |
+| **Auto-apply** | `automention: true` | AI fetches and applies the workflow automatically if relevant _(default)_ |
+| **Expanded** | `automention: expanded` | Workflow content is injected directly (fully expanded, no fetch needed) |
+| **Disabled** | `automention: false` | No auto-suggestion |
+
+> **Note**: The legacy `autoworkflow` field is still supported for backward compatibility. `hintForUser` is mapped to `true`.
 
 ### Example
 
 If you have a workflow with:
 ```yaml
 ---
-autoworkflow: true
+automention: true
 description: "Security audit using OWASP Top 10"
 tags: [security, audit, vulnerability]
 ---
@@ -70,12 +72,7 @@ ACTION_REQUIRED: IF matches user intent → get_workflow("name"), else SKIP
 
 The AI will automatically fetch and apply the workflow.
 
-For `autoworkflow: hintForUser`, the hint appears as:
-```
-[Suggested workflows: // security-audit — "Security audit using OWASP Top 10"]
-```
-
-And the AI will suggest it to you without auto-applying.
+For `automention: expanded`, the workflow content is injected directly without requiring a fetch.
 
 ## Smart Suggestions ("Did you mean?")
 
@@ -153,7 +150,7 @@ The filename becomes the workflow name:
 description: "Short description of what this workflow does"
 shortcuts: [mw, my-wf]
 tags: [review, check, analyze]
-autoworkflow: true
+automention: true
 ---
 # My Custom Workflow
 
@@ -173,9 +170,10 @@ Then do this...
 | `description` | string | Short description shown in catalog |
 | `shortcuts` / `aliases` | array | Alternative names to trigger this workflow |
 | `tags` | array | Keywords for auto-suggestion matching (supports tag groups) |
-| `autoworkflow` | `true` / `hintForUser` / `false` | Auto-suggestion mode (default: `false`) |
+| `automention` | `true` / `expanded` / `false` | Auto-suggestion mode (default: `true`) |
 | `workflowInWorkflow` | `true` / `hints` / `false` | Nested workflow expansion mode (default: `false`) |
-| `agents` | array | Limit auto-suggestion to specific agents |
+| `onlyFor` | array | Limit visibility to specific agents (e.g., `[frontend, oracle]`) |
+| `spawnAt` | array | Inject workflow when an agent spawns (e.g., `[frontend:expanded, oracle]`) |
 
 ### Tag Groups (Smart Matching)
 
@@ -229,6 +227,43 @@ shortcuts: [cr, review_commit, commit-review]
 
 Now `//cr`, `//review_commit`, and `//commit-review` all trigger the same workflow.
 
+### Agent Spawn Injection
+
+Workflows can be automatically injected when specific agents are spawned. Use the `spawnAt` field to configure this:
+
+```yaml
+---
+description: "Frontend best practices"
+spawnAt: [frontend:expanded, frontend-ui-ux-engineer]
+---
+# Frontend Guidelines
+
+Always use semantic HTML...
+```
+
+**Syntax**: `agent-name` or `agent-name:mode`
+
+| Mode | Behavior |
+|------|----------|
+| (default) | Shows hint to fetch the workflow |
+| `:expanded` | Injects full workflow content immediately |
+
+**Example**: When a `frontend` agent spawns for the first time in a session, the workflow above would be injected with its full content (`:expanded` mode).
+
+### Visibility Filtering (onlyFor)
+
+Limit which agents can see a workflow during auto-suggestion:
+
+```yaml
+---
+description: "Oracle-only architecture guide"
+automention: true
+onlyFor: [oracle]
+---
+```
+
+This workflow will only be auto-suggested when the `oracle` agent is active, not for other agents.
+
 ## Tools Provided
 
 | Tool | Description |
@@ -266,7 +301,9 @@ Now `//cr`, `//review_commit`, and `//commit-review` all trigger the same workfl
 | `shortcuts` | No | Comma-separated aliases, e.g., `"cr, review"` |
 | `description` | No | Short description of the workflow |
 | `tags` | No | Comma-separated tags for auto-suggestion |
-| `autoworkflow` | No | `true` / `hintForUser` / `false` (default: `false`) |
+| `automention` | No | `true` / `expanded` / `false` (default: `true`) |
+| `onlyFor` | No | Comma-separated agent names for visibility filter |
+| `spawnAt` | No | Comma-separated agent spawn triggers, e.g., `"frontend:expanded, oracle"` |
 
 ## How It Works
 

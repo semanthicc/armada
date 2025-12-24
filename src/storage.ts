@@ -108,15 +108,16 @@ export function loadWorkflows(projectDir: string): Map<string, Workflow> {
         const name = basename(filePath, '.md');
         if (!workflows.has(name)) {
           const rawContent = readFileSync(filePath, 'utf-8');
-          const { aliases, tags, agents, description, autoworkflow, workflowInWorkflow, body } = parseFrontmatter(rawContent);
+          const { aliases, tags, onlyFor, spawnAt, description, automention, workflowInWorkflow, body } = parseFrontmatter(rawContent);
           
           const workflow: Workflow = { 
             name, 
             aliases, 
             tags, 
-            agents, 
+            onlyFor, 
+            spawnAt,
             description, 
-            autoworkflow, 
+            automention, 
             workflowInWorkflow, 
             content: body, 
             source, 

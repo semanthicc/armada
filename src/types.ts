@@ -4,17 +4,23 @@ export interface TagOrGroup {
 
 export type TagEntry = string | (string | TagOrGroup)[] | TagOrGroup;
 
-export type AutoworkflowMode = 'true' | 'hintForUser' | 'false';
+export type AutomentionMode = 'true' | 'expanded' | 'false';
 
 export type WorkflowInWorkflowMode = 'true' | 'hints' | 'false';
+
+export interface SpawnAtEntry {
+  agent: string;
+  mode: 'hint' | 'expanded';
+}
 
 export interface Workflow {
   name: string;
   aliases: string[];
   tags: TagEntry[];
-  agents: string[];
+  onlyFor: string[];
+  spawnAt: SpawnAtEntry[];
   description: string;
-  autoworkflow: AutoworkflowMode;
+  automention: AutomentionMode;
   workflowInWorkflow: WorkflowInWorkflowMode;
   content: string;
   source: 'project' | 'global';
@@ -25,9 +31,10 @@ export interface Workflow {
 export interface ParsedFrontmatter {
   aliases: string[];
   tags: TagEntry[];
-  agents: string[];
+  onlyFor: string[];
+  spawnAt: SpawnAtEntry[];
   description: string;
-  autoworkflow: AutoworkflowMode;
+  automention: AutomentionMode;
   workflowInWorkflow: WorkflowInWorkflowMode;
   body: string;
 }
@@ -45,8 +52,13 @@ export interface WorkflowRef {
 
 export interface AutoWorkflowMatchResult {
   autoApply: string[];
-  userHints: string[];
+  expandedApply: string[];
   matchedKeywords: Map<string, string[]>;
+}
+
+export interface SpawnMatchResult {
+  hints: string[];
+  expanded: string[];
 }
 
 export interface ExpansionResult {

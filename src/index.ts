@@ -17,13 +17,13 @@ import {
   isOrGroup,
   extractWorkflowReferences,
   formatAutoApplyHint, 
-  formatUserHint,
   shortId,
   processMessageText,
   expandWorkflowMentions,
-  findMatchingAutoWorkflows
+  findMatchingAutoWorkflows,
+  findSpawnWorkflows
 } from './engine';
-import type { VariableResolver, AutoworkflowMode, WorkflowInWorkflowMode, TagEntry } from './engine';
+import type { VariableResolver, AutomentionMode, WorkflowInWorkflowMode, TagEntry } from './engine';
 import type { Workflow, WorkflowConfig, WorkflowRef } from './types';
 
 // WorkflowInfo is now Workflow from types.ts
@@ -42,6 +42,7 @@ interface PluginEvent {
 
 const sessionWorkflows = new Map<string, Map<string, WorkflowRef>>();
 const processedAutoApply = new Set<string>();
+const sessionSpawnedAgents = new Map<string, Set<string>>();
 
 // shortId is now imported from engine.ts
 
@@ -186,8 +187,36 @@ export const WorkflowsPlugin: Plugin = async (ctx: PluginInput) => {
       const hasRule = output.system.some(s => s.includes("DISTINCTION RULE"));
       if (hasRule) return;
 
-      const workflowSystemContent = buildWorkflowSystemPrompt(workflows, input.agent);
-      output.system.push(workflowSystemContent);
+      const hasCatalog = output.system.some(s => s.includes("<workflow-catalog"));
+      if (hasCatalog) return;
+
+      const activeAgent = input.agent;
+      const catalogEntries = [...workflows.values()]
+        .filter(w => w.automention !== 'false')
+        .filter(w => w.onlyFor.length === 0 || (activeAgent && w.onlyFor.includes(activeAgent)))
+        .filter((w, idx, arr) => arr.findIndex(x => x.name === w.name) === idx)
+        .map(w => {
+          const tagsStr = w.tags.length > 0 ? ` [${w.tags.join(', ')}]` : '';
+          const aliasStr = w.aliases.length > 0 ? ` (aliases: ${w.aliases.join(', ')})` : '';
+          const modeStr = w.automention === 'expanded' ? ' {auto-expand}' : '';
+          return `//${w.name}${aliasStr}: ${w.description || 'No description'}${tagsStr}${modeStr}`;
+        });
+
+      if (catalogEntries.length > 0) {
+        output.system.push(
+          `<workflow-catalog description="Available auto-workflows with their descriptions. Use these to decide relevance.">\n${catalogEntries.join('\n')}\n</workflow-catalog>\n\n` +
+          `<auto-workflow-behavior>\n` +
+          `When you see [Auto-apply workflows: //X — "description" — if relevant, use get_workflow("name") to fetch and apply]:\n` +
+          `1. The description is RIGHT THERE in the hint — read it\n` +
+          `2. If description matches user's intent → call get_workflow("X") and APPLY it\n` +
+          `3. No asking permission. No "would you like me to...". Just fetch and execute.\n` +
+          `4. If description does NOT match intent → ignore, proceed normally\n` +
+          `\n` +
+          `When you see [Suggested workflows: //X — "description"]:\n` +
+          `- These are {user-decides} workflows. Show the suggestion to the user, do NOT auto-apply.\n` +
+          `</auto-workflow-behavior>`
+        );
+      }
     },
 
     // Transform user message parts to expand //workflow mentions
@@ -208,11 +237,42 @@ export const WorkflowsPlugin: Plugin = async (ctx: PluginInput) => {
         config = loadConfig();
         const sessionID = _input.sessionID;
         const messageID = output.message.id;
+        const activeAgent = _input.agent;
 
         if (!sessionWorkflows.has(sessionID)) {
           sessionWorkflows.set(sessionID, new Map());
         }
         const workflowRefs = sessionWorkflows.get(sessionID)!;
+
+        if (!sessionSpawnedAgents.has(sessionID)) {
+          sessionSpawnedAgents.set(sessionID, new Set());
+        }
+        const spawnedAgents = sessionSpawnedAgents.get(sessionID)!;
+        
+        const isAgentFirstMessage = activeAgent && !spawnedAgents.has(activeAgent);
+        if (activeAgent && isAgentFirstMessage) {
+          spawnedAgents.add(activeAgent);
+          
+          const spawnResult = findSpawnWorkflows([...workflows.values()], activeAgent);
+          
+          if (spawnResult.expanded.length > 0 || spawnResult.hints.length > 0) {
+            const lastTextPart = output.parts.filter(p => p.type === "text").pop() as { type: "text"; text: string } | undefined;
+            if (lastTextPart) {
+              for (const wfName of spawnResult.expanded) {
+                const wf = workflows.get(wfName);
+                if (wf) {
+                  const id = shortId(messageID, wfName, []);
+                  const expandedContent = expandVariables(wf.content, contextVariables);
+                  lastTextPart.text += `\n\n<workflow name="${wfName}" id="${wfName}-${id}" source="${wf.source}" trigger="agentSpawn">\n${expandedContent}\n</workflow>\n`;
+                }
+              }
+              
+              if (spawnResult.hints.length > 0) {
+                lastTextPart.text += `\n\n${formatAutoApplyHint(spawnResult.hints, workflows, new Map())}`;
+              }
+            }
+          }
+        }
 
         // Global scan: Check ALL parts for mentions first.
         // If the user mentioned a workflow ANYWHERE in this message, we should NOT be offering auto-apply hints.
@@ -237,7 +297,7 @@ export const WorkflowsPlugin: Plugin = async (ctx: PluginInput) => {
               const activeAgent = _input.agent;
               const alreadyReferenced = extractWorkflowReferences(textPart.text);
 
-              const { autoApply, userHints, matchedKeywords } = findMatchingAutoWorkflows(
+              const { autoApply, expandedApply, matchedKeywords } = findMatchingAutoWorkflows(
                 textPart.text,
                 [...workflows.values()],
                 activeAgent,
@@ -248,12 +308,16 @@ export const WorkflowsPlugin: Plugin = async (ctx: PluginInput) => {
                 textPart.text += `\n\n${formatAutoApplyHint(autoApply, workflows, matchedKeywords)}`;
                 processedAutoApply.add(messageID);
               }
-              if (userHints.length > 0) {
-                const descriptions = new Map(userHints.map(name => {
-                  const w = workflows.get(name);
-                  return [name, w?.description || 'No description'] as [string, string];
-                }));
-                textPart.text += `\n\n${formatUserHint(userHints, descriptions)}`;
+              
+              if (expandedApply.length > 0) {
+                for (const wfName of expandedApply) {
+                  const wf = workflows.get(wfName);
+                  if (wf) {
+                    const id = shortId(messageID, wfName, []);
+                    const expandedContent = expandVariables(wf.content, contextVariables);
+                    textPart.text += `\n\n<workflow name="${wfName}" id="${wfName}-${id}" source="${wf.source}">\n${expandedContent}\n</workflow>\n`;
+                  }
+                }
                 processedAutoApply.add(messageID);
               }
               continue;
@@ -329,6 +393,7 @@ export const WorkflowsPlugin: Plugin = async (ctx: PluginInput) => {
       }
       if (event.type === 'session.deleted' && event.properties?.sessionID) {
         sessionWorkflows.delete(event.properties.sessionID);
+        sessionSpawnedAgents.delete(event.properties.sessionID);
       }
       if (event.type === 'message.removed' && event.properties?.sessionID && event.properties?.messageID) {
         const workflowRefs = sessionWorkflows.get(event.properties.sessionID);
@@ -444,15 +509,17 @@ export const WorkflowsPlugin: Plugin = async (ctx: PluginInput) => {
       }),
 
       create_workflow: tool({
-        description: 'Create a new workflow template with YAML frontmatter. ASK user: 1) global or project scope? 2) shortcuts/aliases? 3) description? 4) tags for auto-suggestion? 5) autoworkflow mode (true/hintForUser/false)?',
+        description: 'Create a new workflow template with YAML frontmatter. ASK user: 1) global or project scope? 2) shortcuts/aliases? 3) description? 4) tags for auto-suggestion? 5) automention mode (true/expanded/false)? 6) onlyFor agents? 7) spawnAt agents?',
         args: {
           name: tool.schema.string().describe('The workflow name (without // prefix)'),
           content: tool.schema.string().describe('The markdown content of the workflow (without frontmatter - it will be added automatically)'),
           scope: tool.schema.enum(['global', 'project']).describe('Where to save: global (~/.config/opencode/workflows/) or project (.opencode/workflows/)').optional(),
           shortcuts: tool.schema.string().describe('Comma-separated shortcuts/aliases, e.g., "cr, review"').optional(),
           description: tool.schema.string().describe('Short description of what the workflow does').optional(),
-          tags: tool.schema.string().describe('Tags for auto-suggestion. Use comma for singles, brackets for groups that must ALL match. E.g., "commit, [staged, changes], review" - groups like [staged,changes] trigger when ALL words present, singles need 2+ matches').optional(),
-          autoworkflow: tool.schema.enum(['true', 'hintForUser', 'false']).describe('Auto-suggestion mode: true (AI applies), hintForUser (user decides), false (no suggestion). Default: false').optional(),
+          tags: tool.schema.string().describe('Tags for auto-suggestion. Use comma for singles, brackets for groups that must ALL match. E.g., "commit, [staged, changes], review"').optional(),
+          automention: tool.schema.enum(['true', 'expanded', 'false']).describe('Auto-suggestion mode: true (hint to AI), expanded (full inject), false (disabled). Default: true').optional(),
+          onlyFor: tool.schema.string().describe('Comma-separated agent names this workflow is visible to. Empty = all agents').optional(),
+          spawnAt: tool.schema.string().describe('Agent spawn triggers. Format: "agent" or "agent:expanded". E.g., "frontend-ui-ux-engineer:expanded, oracle"').optional(),
         },
         async execute(args) {
           const scope = args.scope || 'global';
@@ -468,14 +535,22 @@ export const WorkflowsPlugin: Plugin = async (ctx: PluginInput) => {
           const tagArray = args.tags
             ? args.tags.split(',').map(t => t.trim()).filter(t => t)
             : [];
+          const onlyForArray = args.onlyFor
+            ? args.onlyFor.split(',').map(a => a.trim()).filter(a => a)
+            : [];
+          const spawnAtArray = args.spawnAt
+            ? args.spawnAt.split(',').map(a => a.trim()).filter(a => a)
+            : [];
           
-          const autoVal = args.autoworkflow || 'false';
+          const autoVal = args.automention || 'true';
           
           let frontmatter = '---\n';
           if (args.description) frontmatter += `description: "${args.description}"\n`;
           if (shortcutArray.length > 0) frontmatter += `shortcuts: [${shortcutArray.join(', ')}]\n`;
           if (tagArray.length > 0) frontmatter += `tags: [${tagArray.join(', ')}]\n`;
-          frontmatter += `autoworkflow: ${autoVal}\n`;
+          if (autoVal !== 'true') frontmatter += `automention: ${autoVal}\n`;
+          if (onlyForArray.length > 0) frontmatter += `onlyFor: [${onlyForArray.join(', ')}]\n`;
+          if (spawnAtArray.length > 0) frontmatter += `spawnAt: [${spawnAtArray.join(', ')}]\n`;
           frontmatter += '---\n';
           
           const fullContent = frontmatter + args.content;
@@ -487,8 +562,10 @@ export const WorkflowsPlugin: Plugin = async (ctx: PluginInput) => {
             ? `\nShortcuts: ${shortcutArray.map(a => `//${a}`).join(', ')}`
             : '';
           const tagMsg = tagArray.length > 0 ? `\nTags: ${tagArray.join(', ')}` : '';
-          const autoMsg = `\nAutoworkflow: ${autoVal}`;
-          return `Workflow "//${args.name}" created in ${scope} scope.\nPath: ${filePath}${shortcutMsg}${tagMsg}${autoMsg}`;
+          const autoMsg = autoVal !== 'true' ? `\nAutomention: ${autoVal}` : '';
+          const onlyForMsg = onlyForArray.length > 0 ? `\nOnlyFor: ${onlyForArray.join(', ')}` : '';
+          const spawnMsg = spawnAtArray.length > 0 ? `\nSpawnAt: ${spawnAtArray.join(', ')}` : '';
+          return `Workflow "//${args.name}" created in ${scope} scope.\nPath: ${filePath}${shortcutMsg}${tagMsg}${autoMsg}${onlyForMsg}${spawnMsg}`;
         },
       }),
 
