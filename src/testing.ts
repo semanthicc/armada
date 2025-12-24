@@ -9,7 +9,7 @@
  */
 
 import { detectWorkflowMentions, findWorkflowByName, findBestMatch, expandVariables, shortId } from './engine';
-import type { VariableResolver, WorkflowInWorkflowMode } from './engine';
+import type { VariableResolver, WorkflowInWorkflowMode, AutomentionMode, SpawnAtEntry } from './engine';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
@@ -20,9 +20,10 @@ export interface WorkflowInfo {
   name: string;
   aliases: string[];
   tags: (string | string[])[];
-  agents: string[];
+  onlyFor: string[];
+  spawnAt: SpawnAtEntry[];
   description: string;
-  autoworkflow: 'true' | 'hintForUser' | 'false';
+  automention: AutomentionMode;
   workflowInWorkflow: WorkflowInWorkflowMode;
   content: string;
   source: 'project' | 'global';
@@ -299,8 +300,8 @@ export function processMultiPartMessage(
       const userContent = part.text.toLowerCase();
       
       const matchingWorkflows = [...workflowsMap.values()]
-        .filter(w => w.autoworkflow === 'true' || w.autoworkflow === 'hintForUser')
-        .filter(w => w.agents.length === 0 || w.agents.includes(activeAgent))
+        .filter(w => w.automention !== 'false')
+        .filter(w => w.onlyFor.length === 0 || w.onlyFor.includes(activeAgent))
         .filter(w => {
           const matchesTag = w.tags.some(t => {
             if (typeof t === 'string') {
@@ -313,7 +314,7 @@ export function processMultiPartMessage(
         });
 
       const autoApply = matchingWorkflows
-        .filter(w => w.autoworkflow === 'true')
+        .filter(w => w.automention === 'true')
         .map(w => `//${w.name} — "${w.description || 'No description'}"`);
 
       if (autoApply.length > 0) {

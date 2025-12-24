@@ -1,7 +1,7 @@
 import type { 
   TagOrGroup, 
   TagEntry, 
-  AutoworkflowMode, 
+  AutomentionMode, 
   WorkflowInWorkflowMode, 
   ParsedFrontmatter,
   VariableResolver,
@@ -10,11 +10,13 @@ import type {
   WorkflowConfig,
   WorkflowRef,
   NestedExpansionResult,
-  ExpansionResult
+  ExpansionResult,
+  SpawnAtEntry,
+  SpawnMatchResult
 } from './types';
 import { MarkdownAwareTokenizer } from './tokenizer';
 
-export type { TagOrGroup, TagEntry, AutoworkflowMode, WorkflowInWorkflowMode, ParsedFrontmatter, VariableResolver, AutoWorkflowMatchResult };
+export type { TagOrGroup, TagEntry, AutomentionMode, WorkflowInWorkflowMode, ParsedFrontmatter, VariableResolver, AutoWorkflowMatchResult, SpawnAtEntry, SpawnMatchResult };
 
 export function normalize(s: string): string {
   return s.toLowerCase().replace(/[-_]/g, '');
@@ -180,12 +182,23 @@ export function parseTagsField(yaml: string): TagEntry[] {
   return result;
 }
 
+export function parseSpawnAtField(yaml: string): SpawnAtEntry[] {
+  const raw = parseArrayField(yaml, 'spawnAt');
+  return raw.map(entry => {
+    if (entry.includes(':')) {
+      const [agent, mode] = entry.split(':');
+      return { agent: agent.trim(), mode: mode.trim() === 'expanded' ? 'expanded' : 'hint' } as SpawnAtEntry;
+    }
+    return { agent: entry.trim(), mode: 'hint' } as SpawnAtEntry;
+  });
+}
+
 export function parseFrontmatter(fileContent: string): ParsedFrontmatter {
   const frontmatterRegex = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/;
   const match = fileContent.match(frontmatterRegex);
 
   if (!match) {
-    return { aliases: [], tags: [], agents: [], description: '', autoworkflow: 'false', workflowInWorkflow: 'false', body: fileContent };
+    return { aliases: [], tags: [], onlyFor: [], spawnAt: [], description: '', automention: 'true', workflowInWorkflow: 'false', body: fileContent };
   }
 
   const yaml = match[1];
@@ -196,19 +209,30 @@ export function parseFrontmatter(fileContent: string): ParsedFrontmatter {
     ...parseArrayField(yaml, 'shortcuts')
   ];
   const tags = parseTagsField(yaml);
-  const agents = parseArrayField(yaml, 'agents');
+  
+  const onlyFor = [
+    ...parseArrayField(yaml, 'onlyFor'),
+    ...parseArrayField(yaml, 'agents')
+  ];
+  
+  const spawnAt = parseSpawnAtField(yaml);
 
   const descMatch = yaml.match(/^description:\s*(.*)$/m);
   const description = descMatch ? descMatch[1].trim().replace(/^['"]|['"]$/g, '') : '';
 
-  const autoMatch = yaml.match(/^autoworkflow:\s*(.*)$/m);
-  let autoworkflow: AutoworkflowMode = 'false';
-  if (autoMatch) {
-    const val = autoMatch[1].trim().toLowerCase();
-    if (val === 'true' || val === 'yes') {
-      autoworkflow = 'true';
-    } else if (val === 'hintforuser' || val === 'hint') {
-      autoworkflow = 'hintForUser';
+  const autoMatch = yaml.match(/^automention:\s*(.*)$/m);
+  const legacyAutoMatch = yaml.match(/^autoworkflow:\s*(.*)$/m);
+  let automention: AutomentionMode = 'true';
+  
+  const matchToUse = autoMatch || legacyAutoMatch;
+  if (matchToUse) {
+    const val = matchToUse[1].trim().toLowerCase();
+    if (val === 'false' || val === 'no') {
+      automention = 'false';
+    } else if (val === 'expanded') {
+      automention = 'expanded';
+    } else if (val === 'true' || val === 'yes' || val === 'hintforuser' || val === 'hint') {
+      automention = 'true';
     }
   }
 
@@ -223,7 +247,7 @@ export function parseFrontmatter(fileContent: string): ParsedFrontmatter {
     }
   }
 
-  return { aliases, tags, agents, description, autoworkflow, workflowInWorkflow, body };
+  return { aliases, tags, onlyFor, spawnAt, description, automention, workflowInWorkflow, body };
 }
 
 export function formatSuggestion(name: string, aliases: string[], maxAliases = 3): string {
@@ -306,7 +330,7 @@ export function findMatchingAutoWorkflows(
   const matchedKeywords = new Map<string, string[]>();
   
   if (/\/\/\s+[\w-]/.test(userContent)) {
-    return { autoApply: [], userHints: [], matchedKeywords };
+    return { autoApply: [], expandedApply: [], matchedKeywords };
   }
 
   const detectedRefs = extractWorkflowReferences(userContent);
@@ -324,8 +348,8 @@ export function findMatchingAutoWorkflows(
   const matchingWorkflows: Workflow[] = [];
 
   for (const w of workflows) {
-    if (w.autoworkflow !== 'true' && w.autoworkflow !== 'hintForUser') continue;
-    if (w.agents.length > 0 && (!activeAgent || !w.agents.includes(activeAgent))) continue;
+    if (w.automention === 'false') continue;
+    if (w.onlyFor.length > 0 && (!activeAgent || !w.onlyFor.includes(activeAgent))) continue;
     if (allExplicit.has(w.name.toLowerCase())) continue;
     if (w.aliases.some(a => allExplicit.has(a.toLowerCase()))) continue;
 
@@ -380,14 +404,37 @@ export function findMatchingAutoWorkflows(
   }
 
   const autoApply = matchingWorkflows
-    .filter(w => w.autoworkflow === 'true')
+    .filter(w => w.automention === 'true')
     .map(w => w.name);
   
-  const userHints = matchingWorkflows
-    .filter(w => w.autoworkflow === 'hintForUser')
+  const expandedApply = matchingWorkflows
+    .filter(w => w.automention === 'expanded')
     .map(w => w.name);
 
-  return { autoApply, userHints, matchedKeywords };
+  return { autoApply, expandedApply, matchedKeywords };
+}
+
+export function findSpawnWorkflows(
+  workflows: Workflow[],
+  activeAgent: string
+): SpawnMatchResult {
+  const hints: string[] = [];
+  const expanded: string[] = [];
+
+  for (const w of workflows) {
+    for (const entry of w.spawnAt) {
+      if (entry.agent === activeAgent) {
+        if (entry.mode === 'expanded') {
+          expanded.push(w.name);
+        } else {
+          hints.push(w.name);
+        }
+        break;
+      }
+    }
+  }
+
+  return { hints, expanded };
 }
 
 export function extractWorkflowReferences(text: string): string[] {

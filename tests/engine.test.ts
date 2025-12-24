@@ -470,7 +470,7 @@ autoworkflow: true
     expect(result.aliases).toEqual(['cr']);
     expect(result.tags).toEqual(['git', 'commit']);
     expect(result.description).toBe('Review commits');
-    expect(result.autoworkflow).toBe('true');
+    expect(result.automention).toBe('true');
     expect(result.body).toBe('# Content here');
   });
 
@@ -495,42 +495,42 @@ body`;
     expect(result.aliases).toEqual(['a1', 's1']);
   });
 
-  test('handles no frontmatter', () => {
+  test('handles no frontmatter - defaults automention to true', () => {
     const content = '# Just markdown';
     const result = parseFrontmatter(content);
     expect(result.aliases).toEqual([]);
-    expect(result.autoworkflow).toBe('false');
+    expect(result.automention).toBe('true');
     expect(result.body).toBe('# Just markdown');
   });
 
-  test('handles autoworkflow: yes', () => {
+  test('handles autoworkflow: yes (backward compat)', () => {
     const content = `---
 autoworkflow: yes
 ---
 body`;
 
     const result = parseFrontmatter(content);
-    expect(result.autoworkflow).toBe('true');
+    expect(result.automention).toBe('true');
   });
 
-  test('handles autoworkflow: hintForUser', () => {
+  test('handles autoworkflow: hintForUser maps to true', () => {
     const content = `---
 autoworkflow: hintForUser
 ---
 body`;
 
     const result = parseFrontmatter(content);
-    expect(result.autoworkflow).toBe('hintForUser');
+    expect(result.automention).toBe('true');
   });
 
-  test('handles autoworkflow: hint (alias for hintForUser)', () => {
+  test('handles autoworkflow: hint maps to true', () => {
     const content = `---
 autoworkflow: hint
 ---
 body`;
 
     const result = parseFrontmatter(content);
-    expect(result.autoworkflow).toBe('hintForUser');
+    expect(result.automention).toBe('true');
   });
 
   test('handles autoworkflow: false explicitly', () => {
@@ -540,7 +540,7 @@ autoworkflow: false
 body`;
 
     const result = parseFrontmatter(content);
-    expect(result.autoworkflow).toBe('false');
+    expect(result.automention).toBe('false');
   });
 
   test('handles quoted description', () => {
@@ -553,14 +553,14 @@ body`;
     expect(result.description).toBe('Review staged git changes');
   });
 
-  test('handles agents field', () => {
+  test('handles agents field (maps to onlyFor)', () => {
     const content = `---
 agents: [coder, reviewer]
 ---
 body`;
 
     const result = parseFrontmatter(content);
-    expect(result.agents).toEqual(['coder', 'reviewer']);
+    expect(result.onlyFor).toEqual(['coder', 'reviewer']);
   });
 
   test('handles nested tag groups in frontmatter', () => {
@@ -831,18 +831,20 @@ describe('findMatchingAutoWorkflows', () => {
     name: 'patchlog',
     aliases: ['patchnote'],
     tags: [['patchlog', 'commit']],
-    agents: [],
+    onlyFor: [],
+    spawnAt: [],
     description: 'Generate a structured patchlog entry for documentation',
-    autoworkflow: 'true' as const
+    automention: 'true' as const
   };
 
   const reviewWorkflow = {
     name: 'code-review',
     aliases: ['cr'],
     tags: ['review', 'code'],
-    agents: [],
+    onlyFor: [],
+    spawnAt: [],
     description: 'Review code changes',
-    autoworkflow: 'true' as const
+    automention: 'true' as const
   };
 
   test('matches when AND group tags all present', () => {
@@ -1084,8 +1086,9 @@ describe('formatAutoApplyHint', () => {
     description,
     aliases: [],
     tags: [],
-    agents: [],
-    autoworkflow: 'true',
+    onlyFor: [],
+    spawnAt: [],
+    automention: 'true',
     workflowInWorkflow: 'false',
     content: '',
     source: 'global',
