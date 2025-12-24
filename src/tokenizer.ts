@@ -1,5 +1,8 @@
 import { logger } from './logger';
-import { parseWorkflowArgs } from './engine';
+import { parseOrderArgs } from './orders';
+
+// Backward compat alias
+const parseWorkflowArgs = parseOrderArgs;
 
 export interface TokenizedMention {
   name: string;

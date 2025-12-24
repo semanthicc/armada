@@ -1,5 +1,9 @@
 import { describe, test, expect } from 'bun:test';
-import { extractWorkflowReferences, shortId } from '../src/engine';
+import { shortId } from '../src/core';
+import { extractOrderReferences } from '../src/orders';
+
+// Backward compat alias
+const extractWorkflowReferences = extractOrderReferences;
 
 describe('Reproduction Tests', () => {
   

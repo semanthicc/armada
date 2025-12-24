@@ -1,11 +1,17 @@
 import { describe, test, expect } from 'bun:test';
-import { processMessageText, parseFrontmatter, expandNestedWorkflows } from '../src/engine';
-import { loadWorkflows } from '../src/storage';
-import type { Workflow } from '../src/types';
+import { processMessageText, expandNestedOrders } from '../src/orders';
+import { parseOrderFrontmatter, loadOrders } from '../src/orders';
+import type { Order } from '../src/orders';
+
+// Backward compat aliases
+const parseFrontmatter = parseOrderFrontmatter;
+const expandNestedWorkflows = expandNestedOrders;
+const loadWorkflows = loadOrders;
+type Workflow = Order;
 
 describe('Bug 7: Real patchlog.md nested expansion', () => {
   
-  test('parseFrontmatter defaults workflowInWorkflow to "false" when not specified', () => {
+  test('parseFrontmatter defaults orderInOrder to "false" when not specified', () => {
     const content = `---
 automention: true
 description: "Test workflow"
@@ -13,19 +19,19 @@ description: "Test workflow"
 # Body`;
     
     const result = parseFrontmatter(content);
-    expect(result.workflowInWorkflow).toBe('false');
+    expect(result.orderInOrder).toBe('false');
   });
 
-  test('loadWorkflows loads patchlog with workflowInWorkflow="false"', () => {
+  test('loadWorkflows loads patchlog with orderInOrder="false"', () => {
     const workflows = loadWorkflows('.');
     const patchlog = workflows.get('patchlog');
     
     expect(patchlog).toBeDefined();
-    console.log(`[TEST] patchlog.workflowInWorkflow = "${patchlog?.workflowInWorkflow}" (type: ${typeof patchlog?.workflowInWorkflow})`);
-    expect(patchlog?.workflowInWorkflow).toBe('false');
+    console.log(`[TEST] patchlog.orderInOrder = "${patchlog?.orderInOrder}" (type: ${typeof patchlog?.orderInOrder})`);
+    expect(patchlog?.orderInOrder).toBe('false');
   });
 
-  test('expandNestedWorkflows blocks expansion when workflowInWorkflow="false"', () => {
+  test('expandNestedWorkflows blocks expansion when orderInOrder="false"', () => {
     const parentWorkflow: Workflow = {
       name: 'patchlog',
       aliases: [],
@@ -34,7 +40,7 @@ description: "Test workflow"
       spawnAt: [],
       description: 'test',
       automention: 'false',
-      workflowInWorkflow: 'false',
+      orderInOrder: 'false',
       content: 'suggests //5-approaches for analysis',
       source: 'global',
       path: '/test'
@@ -48,7 +54,7 @@ description: "Test workflow"
       spawnAt: [],
       description: 'test',
       automention: 'false',
-      workflowInWorkflow: 'false',
+      orderInOrder: 'false',
       content: '# 5 Approaches content',
       source: 'global',
       path: '/test'
@@ -71,14 +77,14 @@ description: "Test workflow"
     );
 
     console.log(`[TEST] Expanded content: ${result.content}`);
-    console.log(`[TEST] Nested workflows found: ${result.nestedWorkflows}`);
+    console.log(`[TEST] Nested workflows found: ${result.nestedOrders}`);
     
     // Should NOT expand - content should remain unchanged
     expect(result.content).toBe('suggests //5-approaches for analysis');
-    expect(result.nestedWorkflows.length).toBe(0);
+    expect(result.nestedOrders.length).toBe(0);
   });
 
-  test('expandNestedWorkflows blocks when workflowInWorkflow is undefined', () => {
+  test('expandNestedWorkflows blocks when orderInOrder is undefined', () => {
     const parentWorkflow: Partial<Workflow> & { name: string; content: string } = {
       name: 'test',
       aliases: [],
@@ -100,7 +106,7 @@ description: "Test workflow"
       spawnAt: [],
       description: 'test',
       automention: 'false',
-      workflowInWorkflow: 'false',
+      orderInOrder: 'false',
       content: '# Content',
       source: 'global',
       path: '/test'
@@ -126,7 +132,7 @@ description: "Test workflow"
     
     // Should NOT expand even with undefined
     expect(result.content).toBe('try //5-approaches');
-    expect(result.nestedWorkflows.length).toBe(0);
+    expect(result.nestedOrders.length).toBe(0);
   });
 
   test('REAL: processMessageText with loaded patchlog should NOT expand nested', () => {
@@ -138,7 +144,7 @@ description: "Test workflow"
       return;
     }
 
-    console.log(`[TEST] patchlog.workflowInWorkflow = "${patchlog.workflowInWorkflow}"`);
+    console.log(`[TEST] patchlog.orderInOrder = "${patchlog.orderInOrder}"`);
     console.log(`[TEST] patchlog.content contains //5-approaches: ${patchlog.content.includes('//5-approaches')}`);
 
     const result = processMessageText(

@@ -1,54 +1,49 @@
 import type { Plugin, PluginInput } from '@opencode-ai/plugin';
 import type { Part, UserMessage } from '@opencode-ai/sdk';
 import { tool } from '@opencode-ai/plugin';
-import { loadConfig, loadWorkflows, getWorkflowPath, saveWorkflow, deleteWorkflow, renameWorkflowFile, workflowExists } from './storage';
-import { existsSync, readdirSync, readFileSync, writeFileSync, unlinkSync, mkdirSync, renameSync } from 'fs';
+import { existsSync, writeFileSync, unlinkSync, renameSync } from 'fs';
 import { execSync } from 'child_process';
-import { join, basename } from 'path';
-import { homedir } from 'os';
-import { 
-  findBestMatch, 
-  findAllMatches, 
-  findWorkflowByName, 
-  detectWorkflowMentions, 
-  parseFrontmatter, 
-  formatSuggestion, 
-  expandVariables, 
+import { basename } from 'path';
+
+// Core module imports
+import {
+  loadConfig,
+  getPromptPath,
+  promptExists,
+  findBestMatch,
+  findAllMatches,
+  findByName,
+  expandVariables,
   isOrGroup,
-  extractWorkflowReferences,
-  formatAutoApplyHint, 
   shortId,
+  showToast,
+} from './core';
+import type { VariableResolver, CaptainConfig, TagEntry, PluginEvent } from './core';
+
+// Orders module imports
+import {
+  loadOrders,
+  detectOrderMentions,
+  extractOrderReferences,
+  formatAutoApplyHint,
+  formatSuggestion,
   processMessageText,
-  expandWorkflowMentions,
-  findMatchingAutoWorkflows,
-  findSpawnWorkflows
-} from './engine';
-import type { VariableResolver, AutomentionMode, WorkflowInWorkflowMode, TagEntry } from './engine';
-import type { Workflow, WorkflowConfig, WorkflowRef } from './types';
+  expandOrderMentions,
+  findMatchingAutoOrders,
+  findSpawnOrders,
+} from './orders';
+import type { Order, OrderRef, AutomentionMode, OrderInOrderMode } from './orders';
 
-// WorkflowInfo is now Workflow from types.ts
-// WorkflowConfig is now imported from types.ts
-
-interface PluginEvent {
-  type: string;
-  properties?: {
-    sessionID?: string;
-    messageID?: string;
-    [key: string]: unknown;
-  };
-}
-
-// loadConfig, loadWorkflows, getWorkflowPath are now imported from storage.ts
+// Type aliases for backward compatibility in this file
+type Workflow = Order;
+type WorkflowRef = OrderRef;
+type WorkflowConfig = CaptainConfig;
 
 const sessionWorkflows = new Map<string, Map<string, WorkflowRef>>();
 const processedAutoApply = new Set<string>();
 const sessionSpawnedAgents = new Map<string, Set<string>>();
 
-// shortId is now imported from engine.ts
 
-// NestedExpansionResult and expandNestedWorkflows are now imported from engine.ts
-
-// expandWorkflowMentions is now imported from engine.ts
 
 const DISTINCTION_RULE = `
 <system-rule>
@@ -87,22 +82,7 @@ THIS IS WRONG. The workflow EXISTS for this purpose. USE IT.
 </system-rule>
 `;
 
-async function showToast(
-  ctx: PluginInput,
-  message: string,
-  variant: "info" | "success" | "warning" | "error" = "info",
-  title?: string,
-  duration = 3000
-) {
-  try {
-    await ctx.client.tui.publish({
-      body: {
-        type: "tui.toast.show",
-        properties: { title, message, variant, duration }
-      }
-    });
-  } catch {}
-}
+
 
 function buildWorkflowSystemPrompt(workflows: Map<string, Workflow>, activeAgent?: string): string {
   const parts: string[] = [DISTINCTION_RULE];
@@ -139,7 +119,7 @@ function buildWorkflowSystemPrompt(workflows: Map<string, Workflow>, activeAgent
 
 export const WorkflowsPlugin: Plugin = async (ctx: PluginInput) => {
   const { directory } = ctx;
-  let workflows = loadWorkflows(directory);
+  let workflows = loadOrders(directory);
   let config = loadConfig();
 
   const contextVariables: Record<string, VariableResolver> = {
@@ -158,7 +138,7 @@ export const WorkflowsPlugin: Plugin = async (ctx: PluginInput) => {
     // PRIMARY: chat.params hook - appends to systemPrompt like opencode-elf
     "chat.params": async (params: Record<string, unknown>) => {
       try {
-        workflows = loadWorkflows(directory);
+        workflows = loadOrders(directory);
         
         const input = params.input as Record<string, unknown> | undefined;
         if (!input) return;
@@ -233,7 +213,7 @@ export const WorkflowsPlugin: Plugin = async (ctx: PluginInput) => {
       }
     ) => {
       try {
-        workflows = loadWorkflows(directory);
+        workflows = loadOrders(directory);
         config = loadConfig();
         const sessionID = _input.sessionID;
         const messageID = output.message.id;
@@ -253,7 +233,7 @@ export const WorkflowsPlugin: Plugin = async (ctx: PluginInput) => {
         if (activeAgent && isAgentFirstMessage) {
           spawnedAgents.add(activeAgent);
           
-          const spawnResult = findSpawnWorkflows([...workflows.values()], activeAgent);
+          const spawnResult = findSpawnOrders([...workflows.values()], activeAgent);
           
           if (spawnResult.expanded.length > 0 || spawnResult.hints.length > 0) {
             const lastTextPart = output.parts.filter(p => p.type === "text").pop() as { type: "text"; text: string } | undefined;
@@ -278,7 +258,7 @@ export const WorkflowsPlugin: Plugin = async (ctx: PluginInput) => {
         // If the user mentioned a workflow ANYWHERE in this message, we should NOT be offering auto-apply hints.
         const hasGlobalMentions = output.parts.some(
           (p: { type: string; text?: string }) =>
-            p.type === "text" && p.text && detectWorkflowMentions(p.text).length > 0
+            p.type === "text" && p.text && detectOrderMentions(p.text).length > 0
         );
 
         const textParts = output.parts.filter(p => p.type === "text" && "text" in p);
@@ -287,7 +267,7 @@ export const WorkflowsPlugin: Plugin = async (ctx: PluginInput) => {
         for (const part of output.parts) {
           if (part.type === "text" && "text" in part) {
             const textPart = part as { type: "text"; text: string };
-            const mentions = detectWorkflowMentions(textPart.text);
+            const mentions = detectOrderMentions(textPart.text);
 
             // Only run auto-apply logic if there are NO mentions in the ENTIRE message, not just this part.
             // AND only for the last text part to avoid duplicate hints.
@@ -295,9 +275,9 @@ export const WorkflowsPlugin: Plugin = async (ctx: PluginInput) => {
               if (processedAutoApply.has(messageID)) continue;
               
               const activeAgent = _input.agent;
-              const alreadyReferenced = extractWorkflowReferences(textPart.text);
+              const alreadyReferenced = extractOrderReferences(textPart.text);
 
-              const { autoApply, expandedApply, matchedKeywords } = findMatchingAutoWorkflows(
+              const { autoApply, expandedApply, matchedKeywords } = findMatchingAutoOrders(
                 textPart.text,
                 [...workflows.values()],
                 activeAgent,
@@ -388,7 +368,7 @@ export const WorkflowsPlugin: Plugin = async (ctx: PluginInput) => {
 
     event: async ({ event }: { event: PluginEvent }) => {
       if (event.type === 'session.created') {
-        workflows = loadWorkflows(directory);
+        workflows = loadOrders(directory);
         config = loadConfig();
       }
       if (event.type === 'session.deleted' && event.properties?.sessionID) {
@@ -417,9 +397,9 @@ export const WorkflowsPlugin: Plugin = async (ctx: PluginInput) => {
             .describe('The text containing //workflow mentions to expand'),
         },
         async execute(args) {
-          workflows = loadWorkflows(directory);
+          workflows = loadOrders(directory);
           config = loadConfig();
-          const { expanded, found, notFound } = expandWorkflowMentions(args.text, workflows, config);
+          const { expanded, found, notFound } = expandOrderMentions(args.text, workflows, config);
 
           if (found.length === 0 && notFound.length === 0) {
             return `No //workflow mentions detected in text.\n\nOriginal: ${args.text}`;
@@ -439,7 +419,7 @@ export const WorkflowsPlugin: Plugin = async (ctx: PluginInput) => {
           scope: tool.schema.enum(['global', 'project']).describe('Filter by scope').optional(),
         },
         async execute(args) {
-          workflows = loadWorkflows(directory);
+          workflows = loadOrders(directory);
 
           if (workflows.size === 0) {
             return 'No workflows available.\n\nCreate .md files in:\n- ~/.config/opencode/workflows/ (global)\n- .opencode/workflows/ (project-specific)';
@@ -494,7 +474,7 @@ export const WorkflowsPlugin: Plugin = async (ctx: PluginInput) => {
             .describe('The workflow name (without the // prefix), e.g., "linus-torvalds"'),
         },
         async execute(args) {
-          workflows = loadWorkflows(directory);
+          workflows = loadOrders(directory);
 
           const workflow = workflows.get(args.name);
           if (!workflow) {
@@ -523,7 +503,7 @@ export const WorkflowsPlugin: Plugin = async (ctx: PluginInput) => {
         },
         async execute(args) {
           const scope = args.scope || 'global';
-          const filePath = getWorkflowPath(args.name, scope, directory);
+          const filePath = getPromptPath(args.name, scope, directory);
 
           if (existsSync(filePath)) {
             return `Error: Workflow "${args.name}" already exists in ${scope} scope. Use edit_workflow to modify it.`;
@@ -556,7 +536,7 @@ export const WorkflowsPlugin: Plugin = async (ctx: PluginInput) => {
           const fullContent = frontmatter + args.content;
 
           writeFileSync(filePath, fullContent, 'utf-8');
-          workflows = loadWorkflows(directory);
+          workflows = loadOrders(directory);
           
           const shortcutMsg = shortcutArray.length > 0 
             ? `\nShortcuts: ${shortcutArray.map(a => `//${a}`).join(', ')}`
@@ -579,14 +559,14 @@ export const WorkflowsPlugin: Plugin = async (ctx: PluginInput) => {
         },
         async execute(args) {
           const scope = args.scope || 'global';
-          const filePath = getWorkflowPath(args.name, scope, directory);
+          const filePath = getPromptPath(args.name, scope, directory);
 
           if (!existsSync(filePath) && !args.createIfMissing) {
             return `Error: Workflow "${args.name}" not found in ${scope} scope. Set createIfMissing=true to create it.`;
           }
 
           writeFileSync(filePath, args.content, 'utf-8');
-          workflows = loadWorkflows(directory);
+          workflows = loadOrders(directory);
           return `Workflow "//${args.name}" updated successfully.`;
         },
       }),
@@ -599,14 +579,14 @@ export const WorkflowsPlugin: Plugin = async (ctx: PluginInput) => {
         },
         async execute(args) {
           const scope = args.scope || 'global';
-          const filePath = getWorkflowPath(args.name, scope, directory);
+          const filePath = getPromptPath(args.name, scope, directory);
 
           if (!existsSync(filePath)) {
             return `Error: Workflow "${args.name}" not found in ${scope} scope.`;
           }
 
           unlinkSync(filePath);
-          workflows = loadWorkflows(directory);
+          workflows = loadOrders(directory);
           return `Workflow "//${args.name}" deleted successfully.`;
         },
       }),
@@ -620,8 +600,8 @@ export const WorkflowsPlugin: Plugin = async (ctx: PluginInput) => {
         },
         async execute(args) {
           const scope = args.scope || 'global';
-          const oldPath = getWorkflowPath(args.oldName, scope, directory);
-          const newPath = getWorkflowPath(args.newName, scope, directory);
+          const oldPath = getPromptPath(args.oldName, scope, directory);
+          const newPath = getPromptPath(args.newName, scope, directory);
 
           if (!existsSync(oldPath)) {
             return `Error: Workflow "${args.oldName}" not found in ${scope} scope.`;
@@ -632,7 +612,7 @@ export const WorkflowsPlugin: Plugin = async (ctx: PluginInput) => {
           }
 
           renameSync(oldPath, newPath);
-          workflows = loadWorkflows(directory);
+          workflows = loadOrders(directory);
           return `Workflow renamed from "//${args.oldName}" to "//${args.newName}" successfully.`;
         },
       }),
@@ -642,7 +622,7 @@ export const WorkflowsPlugin: Plugin = async (ctx: PluginInput) => {
         args: {},
         async execute() {
           const oldCount = workflows.size;
-          workflows = loadWorkflows(directory);
+          workflows = loadOrders(directory);
           config = loadConfig();
           const newCount = workflows.size;
 

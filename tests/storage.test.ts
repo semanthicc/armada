@@ -2,7 +2,11 @@ import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
 import { mkdirSync, writeFileSync, rmSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { walkDir, loadWorkflows } from '../src/storage';
+import { walkDir } from '../src/core';
+import { loadOrders } from '../src/orders';
+
+// Backward compat alias
+const loadWorkflows = loadOrders;
 
 describe('walkDir', () => {
   const testDir = join(tmpdir(), 'test-workflows-' + Date.now());

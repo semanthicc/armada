@@ -1,5 +1,8 @@
 import { describe, test, expect } from 'bun:test';
-import { detectWorkflowMentions } from '../src/engine';
+import { detectOrderMentions } from '../src/orders';
+
+// Backward compat alias
+const detectWorkflowMentions = detectOrderMentions;
 
 describe('Bug 7: Regex matches inside code blocks', () => {
   test('should NOT detect mentions inside single backticks', () => {

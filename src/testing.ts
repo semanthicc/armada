@@ -1,5 +1,5 @@
 /**
- * Test helpers for opencode-workflows plugin.
+ * Test helpers for opencode-captain plugin.
  * 
  * IMPORTANT: These are NOT exported from the main index.ts to avoid
  * breaking OpenCode's plugin loader which iterates all exports and
@@ -8,13 +8,20 @@
  * Import from './testing' in tests, not from './index'.
  */
 
-import { detectWorkflowMentions, findWorkflowByName, findBestMatch, expandVariables, shortId } from './engine';
-import type { VariableResolver, WorkflowInWorkflowMode, AutomentionMode, SpawnAtEntry } from './engine';
+import { findByName, findBestMatch, expandVariables, shortId } from './core';
+import type { VariableResolver } from './core';
+import { detectOrderMentions } from './orders';
+import type { OrderInOrderMode, AutomentionMode, SpawnAtEntry } from './orders';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 
-export type { VariableResolver } from './engine';
+export type { VariableResolver } from './core';
+
+// Backward compat aliases
+const detectWorkflowMentions = detectOrderMentions;
+const findWorkflowByName = findByName;
+type WorkflowInWorkflowMode = OrderInOrderMode;
 
 export interface WorkflowInfo {
   name: string;

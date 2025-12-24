@@ -1,6 +1,11 @@
 import { describe, test, expect } from 'bun:test';
-import { shortId, findMatchingAutoWorkflows } from '../src/engine';
-import type { Workflow } from '../src/types';
+import { shortId } from '../src/core';
+import { findMatchingAutoOrders, processMessageText } from '../src/orders';
+import type { Order } from '../src/orders';
+
+// Backward compat aliases
+const findMatchingAutoWorkflows = findMatchingAutoOrders;
+type Workflow = Order;
 
 describe('Bug Fixes Regression Tests', () => {
   
@@ -37,7 +42,7 @@ describe('Bug Fixes Regression Tests', () => {
       spawnAt: [],
       description: 'Analyze from 5 perspectives',
       automention: 'true',
-      workflowInWorkflow: 'false',
+      orderInOrder: 'false',
       content: 'content',
       source: 'global',
       path: '/path'
@@ -93,7 +98,7 @@ describe('Bug Fixes Regression Tests', () => {
       spawnAt: [],
       description: 'Analyze from 5 perspectives',
       automention: 'true',
-      workflowInWorkflow: 'false',
+      orderInOrder: 'false',
       content: 'content',
       source: 'global',
       path: '/path'
@@ -199,9 +204,9 @@ describe('Bug Fixes Regression Tests', () => {
     });
   });
 
-  describe('Bug 7: Nested expansion ignores workflowInWorkflow:false', () => {
+  describe('Bug 7: Nested expansion ignores orderInOrder:false', () => {
     test('DEBUG: Check if inline code mentions get expanded', () => {
-      const { processMessageText } = require('../src/engine');
+      // processMessageText is now imported from orders
       
       const parentWorkflow = {
         name: 'patchlog',
@@ -211,7 +216,7 @@ describe('Bug Fixes Regression Tests', () => {
       spawnAt: [],
         description: 'Patchlog',
         automention: 'false',
-        workflowInWorkflow: 'false', // Should NOT expand nested
+        orderInOrder: 'false', // Should NOT expand nested
         content: 'Example: `//5-approaches` suggests the workflow',
         source: 'global',
         path: '/mock/patchlog.md'
@@ -225,7 +230,7 @@ describe('Bug Fixes Regression Tests', () => {
       spawnAt: [],
         description: '5 approaches',
         automention: 'false',
-        workflowInWorkflow: 'false',
+        orderInOrder: 'false',
         content: '# 5 Approaches Content',
         source: 'global',
         path: '/mock/5-approaches.md'
@@ -251,7 +256,7 @@ describe('Bug Fixes Regression Tests', () => {
       console.log('Found:', result.found);
       console.log('=== END DEBUG ===');
 
-      // 5-approaches should NOT be in found list since workflowInWorkflow is false
+      // 5-approaches should NOT be in found list since orderInOrder is false
       expect(result.found).not.toContain('5-approaches');
       // The //5-approaches should remain as literal text
       expect(result.text).toContain('`//5-approaches`');
@@ -259,11 +264,9 @@ describe('Bug Fixes Regression Tests', () => {
     });
   });
 
-  describe('Bug 7b: workflowInWorkflow default behavior', () => {
-    test('nested workflows should NOT expand when workflowInWorkflow is false (default)', () => {
-      // Import processMessageText
-      const { processMessageText } = require('../src/engine');
-      const { Workflow, WorkflowConfig } = require('../src/types');
+  describe('Bug 7b: orderInOrder default behavior', () => {
+    test('nested workflows should NOT expand when orderInOrder is false (default)', () => {
+      // processMessageText is now imported from orders
       
       const parentWorkflow = {
         name: 'parent-wf',
@@ -273,7 +276,7 @@ describe('Bug Fixes Regression Tests', () => {
       spawnAt: [],
         description: 'Parent workflow',
         automention: 'false',
-        workflowInWorkflow: 'false', // Explicitly false
+        orderInOrder: 'false', // Explicitly false
         content: 'Check out //nested-wf for more',
         source: 'global',
         path: '/mock/parent.md'
@@ -287,7 +290,7 @@ describe('Bug Fixes Regression Tests', () => {
       spawnAt: [],
         description: 'Nested workflow',
         automention: 'false',
-        workflowInWorkflow: 'false',
+        orderInOrder: 'false',
         content: '# Nested Content',
         source: 'global',
         path: '/mock/nested.md'
@@ -320,8 +323,8 @@ describe('Bug Fixes Regression Tests', () => {
       expect(result.found).not.toContain('nested-wf');
     });
 
-    test('nested workflows SHOULD expand when workflowInWorkflow is true', () => {
-      const { processMessageText } = require('../src/engine');
+    test('nested workflows SHOULD expand when orderInOrder is true', () => {
+      // processMessageText is now imported from orders
       
       const parentWorkflow = {
         name: 'parent-wf',
@@ -331,7 +334,7 @@ describe('Bug Fixes Regression Tests', () => {
       spawnAt: [],
         description: 'Parent workflow',
         automention: 'false',
-        workflowInWorkflow: 'true', // ENABLED
+        orderInOrder: 'true', // ENABLED
         content: 'Check out //nested-wf for more',
         source: 'global',
         path: '/mock/parent.md'
@@ -345,7 +348,7 @@ describe('Bug Fixes Regression Tests', () => {
       spawnAt: [],
         description: 'Nested workflow',
         automention: 'false',
-        workflowInWorkflow: 'false',
+        orderInOrder: 'false',
         content: '# Nested Content',
         source: 'global',
         path: '/mock/nested.md'

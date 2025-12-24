@@ -1,26 +1,40 @@
 import { describe, test, expect } from 'bun:test';
+// Core module imports
 import { 
   normalize, 
   findBestMatch,
   findAllMatches,
-  findWorkflowByName,
-  detectWorkflowMentions,
-  parseWorkflowArgs,
-  parseFrontmatter,
+  findByName,
   parseArrayField,
   parseTagsField,
-  formatSuggestion,
   expandVariables,
-  expandOrphanWorkflowRefs,
-  extractWorkflowReferences,
   BUILTIN_VARIABLES,
-  findMatchingAutoWorkflows,
   isOrGroup,
+} from '../src/core';
+// Orders module imports
+import {
+  detectOrderMentions,
+  parseOrderArgs,
+  parseOrderFrontmatter,
+  formatSuggestion,
+  expandOrphanOrderRefs,
+  extractOrderReferences,
+  findMatchingAutoOrders,
   formatAutoApplyHint,
   formatAutoApplyHintLegacy,
-  formatUserHint
-} from '../src/engine';
-import type { Workflow } from '../src/types';
+  formatUserHint,
+} from '../src/orders';
+import type { Order } from '../src/orders';
+
+// Backward compat aliases for test readability
+const findWorkflowByName = findByName;
+const detectWorkflowMentions = detectOrderMentions;
+const parseWorkflowArgs = parseOrderArgs;
+const parseFrontmatter = parseOrderFrontmatter;
+const expandOrphanWorkflowRefs = expandOrphanOrderRefs;
+const extractWorkflowReferences = extractOrderReferences;
+const findMatchingAutoWorkflows = findMatchingAutoOrders;
+type Workflow = Order;
 
 describe('normalize', () => {
   test('strips hyphens', () => {
@@ -573,54 +587,64 @@ body`;
     expect(result.tags).toEqual(['commit', ['staged', 'changes'], 'review']);
   });
 
-  test('workflowInWorkflow defaults to false', () => {
+  test('orderInOrder defaults to false', () => {
     const content = `---
 description: test
 ---
 body`;
 
     const result = parseFrontmatter(content);
-    expect(result.workflowInWorkflow).toBe('false');
+    expect(result.orderInOrder).toBe('false');
   });
 
-  test('workflowInWorkflow: true', () => {
+  test('orderInOrder: true (via workflowInWorkflow)', () => {
     const content = `---
 workflowInWorkflow: true
 ---
 body`;
 
     const result = parseFrontmatter(content);
-    expect(result.workflowInWorkflow).toBe('true');
+    expect(result.orderInOrder).toBe('true');
   });
 
-  test('workflowInWorkflow: hints', () => {
+  test('orderInOrder: true (via orderInOrder)', () => {
+    const content = `---
+orderInOrder: true
+---
+body`;
+
+    const result = parseFrontmatter(content);
+    expect(result.orderInOrder).toBe('true');
+  });
+
+  test('orderInOrder: hints', () => {
     const content = `---
 workflowInWorkflow: hints
 ---
 body`;
 
     const result = parseFrontmatter(content);
-    expect(result.workflowInWorkflow).toBe('hints');
+    expect(result.orderInOrder).toBe('hints');
   });
 
-  test('workflowInWorkflow: hint (alias for hints)', () => {
+  test('orderInOrder: hint (alias for hints)', () => {
     const content = `---
 workflowInWorkflow: hint
 ---
 body`;
 
     const result = parseFrontmatter(content);
-    expect(result.workflowInWorkflow).toBe('hints');
+    expect(result.orderInOrder).toBe('hints');
   });
 
-  test('workflowInWorkflow: false explicit', () => {
+  test('orderInOrder: false explicit', () => {
     const content = `---
 workflowInWorkflow: false
 ---
 body`;
 
     const result = parseFrontmatter(content);
-    expect(result.workflowInWorkflow).toBe('false');
+    expect(result.orderInOrder).toBe('false');
   });
 });
 
@@ -825,7 +849,7 @@ describe('expandOrphanWorkflowRefs', () => {
 });
 
 describe('findMatchingAutoWorkflows', () => {
-  const { findMatchingAutoWorkflows } = require('../src/engine');
+  // Using imported findMatchingAutoOrders (aliased as findMatchingAutoWorkflows)
 
   const patchlogWorkflow = {
     name: 'patchlog',
@@ -966,7 +990,7 @@ describe('findMatchingAutoWorkflows', () => {
 });
 
 describe('extractWorkflowReferences', () => {
-  const { extractWorkflowReferences } = require('../src/engine');
+  // Using imported extractOrderReferences (aliased as extractWorkflowReferences)
 
   test('extracts [use_workflow:name-id] references', () => {
     const result = extractWorkflowReferences('[use_workflow:patchlog-kF0y]');
@@ -1081,7 +1105,7 @@ describe('Unicode workflow names', () => {
 });
 
 describe('formatAutoApplyHint', () => {
-  const createWorkflow = (name: string, description: string): Workflow => ({
+  const createOrder = (name: string, description: string): Order => ({
     name,
     description,
     aliases: [],
@@ -1089,50 +1113,50 @@ describe('formatAutoApplyHint', () => {
     onlyFor: [],
     spawnAt: [],
     automention: 'true',
-    workflowInWorkflow: 'false',
+    orderInOrder: 'false',
     content: '',
     source: 'global',
     path: ''
   });
 
   test('wraps output in brackets', () => {
-    const workflows = new Map([['test', createWorkflow('test', 'Test desc')]]);
+    const orders = new Map([['test', createOrder('test', 'Test desc')]]);
     const keywords = new Map([['test', ['keyword1']]]);
-    const result = formatAutoApplyHint(['test'], workflows, keywords);
+    const result = formatAutoApplyHint(['test'], orders, keywords);
     expect(result.startsWith('[')).toBe(true);
     expect(result.endsWith(']')).toBe(true);
   });
 
   test('uses regular space instead of zero-width space', () => {
-    const workflows = new Map([['test', createWorkflow('test', 'Test desc')]]);
+    const orders = new Map([['test', createOrder('test', 'Test desc')]]);
     const keywords = new Map([['test', ['keyword1']]]);
-    const result = formatAutoApplyHint(['test'], workflows, keywords);
+    const result = formatAutoApplyHint(['test'], orders, keywords);
     expect(result).not.toContain('\u200B');
     expect(result).toContain('// test');
   });
 
-  test('singular header for one workflow', () => {
-    const workflows = new Map([['test', createWorkflow('test', 'Test desc')]]);
+  test('singular header for one workflow (standard theme)', () => {
+    const orders = new Map([['test', createOrder('test', 'Test desc')]]);
     const keywords = new Map<string, string[]>();
-    const result = formatAutoApplyHint(['test'], workflows, keywords);
-    expect(result).toContain('⚡ Workflow matched.');
-    expect(result).not.toContain('⚡ Workflows matched.');
+    const result = formatAutoApplyHint(['test'], orders, keywords, 'standard');
+    expect(result).toContain('⚡ Workflow matched');
   });
 
-  test('plural header for multiple workflows', () => {
-    const workflows = new Map([
-      ['test1', createWorkflow('test1', 'Test 1')],
-      ['test2', createWorkflow('test2', 'Test 2')]
+  test('plural header for multiple workflows (standard theme)', () => {
+    const orders = new Map([
+      ['test1', createOrder('test1', 'Test 1')],
+      ['test2', createOrder('test2', 'Test 2')]
     ]);
     const keywords = new Map<string, string[]>();
-    const result = formatAutoApplyHint(['test1', 'test2'], workflows, keywords);
-    expect(result).toContain('⚡ Workflows matched.');
+    const result = formatAutoApplyHint(['test1', 'test2'], orders, keywords, 'standard');
+    // Both use same message key 'ordersMatched' so same text
+    expect(result).toContain('⚡ Workflow matched');
   });
 
   test('includes matched keywords', () => {
-    const workflows = new Map([['test', createWorkflow('test', 'Test desc')]]);
+    const orders = new Map([['test', createOrder('test', 'Test desc')]]);
     const keywords = new Map([['test', ['security', 'audit']]]);
-    const result = formatAutoApplyHint(['test'], workflows, keywords);
+    const result = formatAutoApplyHint(['test'], orders, keywords);
     expect(result).toContain('(matched: "security", "audit")');
   });
 });
