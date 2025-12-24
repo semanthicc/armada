@@ -7,7 +7,7 @@ describe('Bug 7: Real patchlog.md nested expansion', () => {
   
   test('parseFrontmatter defaults workflowInWorkflow to "false" when not specified', () => {
     const content = `---
-autoworkflow: true
+automention: true
 description: "Test workflow"
 ---
 # Body`;
@@ -33,7 +33,7 @@ description: "Test workflow"
       onlyFor: [],
       spawnAt: [],
       description: 'test',
-      autoworkflow: 'false',
+      automention: 'false',
       workflowInWorkflow: 'false',
       content: 'suggests //5-approaches for analysis',
       source: 'global',
@@ -47,7 +47,7 @@ description: "Test workflow"
       onlyFor: [],
       spawnAt: [],
       description: 'test',
-      autoworkflow: 'false',
+      automention: 'false',
       workflowInWorkflow: 'false',
       content: '# 5 Approaches content',
       source: 'global',
@@ -86,7 +86,7 @@ description: "Test workflow"
       onlyFor: [],
       spawnAt: [],
       description: 'test',
-      autoworkflow: 'false',
+      automention: 'false',
       content: 'try //5-approaches',
       source: 'global',
       path: '/test'
@@ -99,7 +99,7 @@ description: "Test workflow"
       onlyFor: [],
       spawnAt: [],
       description: 'test',
-      autoworkflow: 'false',
+      automention: 'false',
       workflowInWorkflow: 'false',
       content: '# Content',
       source: 'global',

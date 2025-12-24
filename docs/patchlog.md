@@ -1,5 +1,20 @@
 # Patchlog
 
+## [1.5.0] - 2025-12-24
+
+### Added
+- Agent spawn injection via `spawnAt` field - auto-inject workflows when specific agents spawn
+- Visibility filtering via `onlyFor` field - limit workflows to specific agents
+- `automention: expanded` mode - inject workflow content directly without requiring fetch
+
+### Changed
+- Renamed `autoworkflow` → `automention` (backward compatible, legacy field still works)
+- Renamed `agents` → `onlyFor` (backward compatible)
+- Default `automention` is now `true` (previously `false`)
+
+### Fixed
+- Merge conflict resolution in system prompt hooks
+
 ## [1.4.2] - 2025-12-24
 
 ### Changed

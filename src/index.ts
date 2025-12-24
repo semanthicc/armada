@@ -108,13 +108,13 @@ function buildWorkflowSystemPrompt(workflows: Map<string, Workflow>, activeAgent
   const parts: string[] = [DISTINCTION_RULE];
 
   const catalogEntries = [...workflows.values()]
-    .filter(w => w.autoworkflow === 'true' || w.autoworkflow === 'hintForUser')
-    .filter(w => w.agents.length === 0 || (activeAgent && w.agents.includes(activeAgent)))
+    .filter(w => w.automention !== 'false')
+    .filter(w => w.onlyFor.length === 0 || (activeAgent && w.onlyFor.includes(activeAgent)))
     .filter((w, idx, arr) => arr.findIndex(x => x.name === w.name) === idx)
     .map(w => {
       const tagsStr = w.tags.length > 0 ? ` [${w.tags.join(', ')}]` : '';
       const aliasStr = w.aliases.length > 0 ? ` (aliases: ${w.aliases.join(', ')})` : '';
-      const modeStr = w.autoworkflow === 'hintForUser' ? ' {user-decides}' : '';
+      const modeStr = w.automention === 'expanded' ? ' {auto-expand}' : '';
       return `//${w.name}${aliasStr}: ${w.description || 'No description'}${tagsStr}${modeStr}`;
     });
 
