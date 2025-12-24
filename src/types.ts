@@ -19,6 +19,7 @@ export interface Workflow {
   content: string;
   source: 'project' | 'global';
   path: string;
+  folder?: string;
 }
 
 export interface ParsedFrontmatter {

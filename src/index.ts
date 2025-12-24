@@ -60,7 +60,7 @@ const DISTINCTION_RULE = `
 **WORKFLOW XML HANDLING** (READ THIS, IT'S IMPORTANT):
 1. **\`<workflow name="X">\` IN MESSAGE**: The content is RIGHT THERE. Read it. Follow it. Execute it. Do NOT call \`get_workflow\` — that's stupid, the content is already in front of you.
 2. **\`[use_workflow:X-id]\` WITHOUT XML**: Orphan reference. Use \`get_workflow\` to retrieve it.
-3. **\`⚡ Workflow matched\` HINT**: System detected relevant workflows. FOR EACH, ask yourself:
+3. **\`[⚡ Workflow matched...]\` HINT**: System detected relevant workflows wrapped in brackets. FOR EACH, ask yourself:
    - "Does this workflow's description match what the user actually wants?"
    - "If I DON'T fetch this, will the user wonder why I ignored their relevant workflow?"
    - If yes → call \`get_workflow("name")\` and apply it. No asking. No suggesting. Just do it.
@@ -78,7 +78,7 @@ const DISTINCTION_RULE = `
 
 **ANTI-PATTERN — DO NOT DO THIS**:
 User: "validate the changes"
-Hint: ⚡ Workflow matched... //inspect
+Hint: [⚡ Workflow matched... //inspect]
 Assistant: *runs tests manually without calling get_workflow("inspect")*
 THIS IS WRONG. The workflow EXISTS for this purpose. USE IT.
 
@@ -339,23 +339,57 @@ export const WorkflowsPlugin: Plugin = async (ctx: PluginInput) => {
 
       list_workflows: tool({
         description: 'List all available workflow templates that can be mentioned with //workflow-name syntax',
-        args: {},
-        async execute() {
+        args: {
+          tag: tool.schema.string().describe('Filter by tag (substring match)').optional(),
+          name: tool.schema.string().describe('Filter by name (substring match)').optional(),
+          folder: tool.schema.string().describe('Filter by folder (substring match)').optional(),
+          scope: tool.schema.enum(['global', 'project']).describe('Filter by scope').optional(),
+        },
+        async execute(args) {
           workflows = loadWorkflows(directory);
 
           if (workflows.size === 0) {
             return 'No workflows available.\n\nCreate .md files in:\n- ~/.config/opencode/workflows/ (global)\n- .opencode/workflows/ (project-specific)';
           }
 
-          const list = [...workflows.values()]
-            .filter((w, i, arr) => arr.findIndex(x => x.name === w.name) === i)
+          let filtered = [...workflows.values()]
+            .filter((w, i, arr) => arr.findIndex(x => x.name === w.name) === i);
+          
+          if (args.scope) {
+            filtered = filtered.filter(w => w.source === args.scope);
+          }
+          if (args.folder) {
+            const folderLower = args.folder.toLowerCase();
+            filtered = filtered.filter(w => w.folder?.toLowerCase().includes(folderLower));
+          }
+          if (args.name) {
+            const nameLower = args.name.toLowerCase();
+            filtered = filtered.filter(w => w.name.toLowerCase().includes(nameLower));
+          }
+          if (args.tag) {
+            const tagLower = args.tag.toLowerCase();
+            filtered = filtered.filter(w => 
+              w.tags.some(t => {
+                if (typeof t === 'string') return t.toLowerCase().includes(tagLower);
+                if (Array.isArray(t)) return t.some(item => typeof item === 'string' && item.toLowerCase().includes(tagLower));
+                return false;
+              })
+            );
+          }
+
+          if (filtered.length === 0) {
+            return `No workflows match the filters.\n\nFilters applied: ${JSON.stringify(args)}`;
+          }
+
+          const list = filtered
             .map((w) => {
               const aliasStr = w.aliases.length > 0 ? ` (aliases: ${w.aliases.join(', ')})` : '';
-              return `- //${w.name}${aliasStr} [${w.source}]: ${w.description || w.content.slice(0, 80).replace(/\n/g, ' ').trim()}...`;
+              const folderStr = w.folder ? ` [${w.folder}/]` : '';
+              return `- //${w.name}${aliasStr}${folderStr} [${w.source}]: ${w.description || w.content.slice(0, 80).replace(/\n/g, ' ').trim()}...`;
             })
             .join('\n');
 
-          return `Available workflows (${workflows.size}):\n\n${list}\n\nUsage: Add //workflow-name anywhere in your message to apply that workflow.`;
+          return `Available workflows (${filtered.length}):\n\n${list}\n\nUsage: Add //workflow-name anywhere in your message to apply that workflow.`;
         },
       }),
 
@@ -376,7 +410,8 @@ export const WorkflowsPlugin: Plugin = async (ctx: PluginInput) => {
             return `Workflow "${args.name}" not found.\n\nAvailable: ${availableStr}\n\nHint: Create .md files in ~/.config/opencode/workflows/ or .opencode/workflows/`;
           }
 
-          return `# Workflow: //${workflow.name}\nSource: ${workflow.source}\nPath: ${workflow.path}\n\n${workflow.content}`;
+          const folderInfo = workflow.folder ? `\nFolder: ${workflow.folder}` : '';
+          return `# Workflow: //${workflow.name}\nSource: ${workflow.source}${folderInfo}\nPath: ${workflow.path}\n\n${workflow.content}`;
         },
       }),
 

@@ -15,8 +15,12 @@ import {
   extractWorkflowReferences,
   BUILTIN_VARIABLES,
   findMatchingAutoWorkflows,
-  isOrGroup
+  isOrGroup,
+  formatAutoApplyHint,
+  formatAutoApplyHintLegacy,
+  formatUserHint
 } from '../src/engine';
+import type { Workflow } from '../src/types';
 
 describe('normalize', () => {
   test('strips hyphens', () => {
@@ -1071,5 +1075,86 @@ describe('Unicode workflow names', () => {
     test('normalizes mixed script workflow name', () => {
       expect(normalize('Review-Ревью_审查')).toBe('reviewревью审查');
     });
+  });
+});
+
+describe('formatAutoApplyHint', () => {
+  const createWorkflow = (name: string, description: string): Workflow => ({
+    name,
+    description,
+    aliases: [],
+    tags: [],
+    agents: [],
+    autoworkflow: 'true',
+    workflowInWorkflow: 'false',
+    content: '',
+    source: 'global',
+    path: ''
+  });
+
+  test('wraps output in brackets', () => {
+    const workflows = new Map([['test', createWorkflow('test', 'Test desc')]]);
+    const keywords = new Map([['test', ['keyword1']]]);
+    const result = formatAutoApplyHint(['test'], workflows, keywords);
+    expect(result.startsWith('[')).toBe(true);
+    expect(result.endsWith(']')).toBe(true);
+  });
+
+  test('uses regular space instead of zero-width space', () => {
+    const workflows = new Map([['test', createWorkflow('test', 'Test desc')]]);
+    const keywords = new Map([['test', ['keyword1']]]);
+    const result = formatAutoApplyHint(['test'], workflows, keywords);
+    expect(result).not.toContain('\u200B');
+    expect(result).toContain('// test');
+  });
+
+  test('singular header for one workflow', () => {
+    const workflows = new Map([['test', createWorkflow('test', 'Test desc')]]);
+    const keywords = new Map<string, string[]>();
+    const result = formatAutoApplyHint(['test'], workflows, keywords);
+    expect(result).toContain('⚡ Workflow matched.');
+    expect(result).not.toContain('⚡ Workflows matched.');
+  });
+
+  test('plural header for multiple workflows', () => {
+    const workflows = new Map([
+      ['test1', createWorkflow('test1', 'Test 1')],
+      ['test2', createWorkflow('test2', 'Test 2')]
+    ]);
+    const keywords = new Map<string, string[]>();
+    const result = formatAutoApplyHint(['test1', 'test2'], workflows, keywords);
+    expect(result).toContain('⚡ Workflows matched.');
+  });
+
+  test('includes matched keywords', () => {
+    const workflows = new Map([['test', createWorkflow('test', 'Test desc')]]);
+    const keywords = new Map([['test', ['security', 'audit']]]);
+    const result = formatAutoApplyHint(['test'], workflows, keywords);
+    expect(result).toContain('(matched: "security", "audit")');
+  });
+});
+
+describe('formatAutoApplyHintLegacy', () => {
+  test('uses regular space instead of zero-width space', () => {
+    const descriptions = new Map([['test', 'Test desc']]);
+    const result = formatAutoApplyHintLegacy(['test'], descriptions);
+    expect(result).not.toContain('\u200B');
+    expect(result).toContain('// test');
+  });
+});
+
+describe('formatUserHint', () => {
+  test('uses regular space instead of zero-width space', () => {
+    const descriptions = new Map([['test', 'Test desc']]);
+    const result = formatUserHint(['test'], descriptions);
+    expect(result).not.toContain('\u200B');
+    expect(result).toContain('// test');
+  });
+
+  test('wraps in suggested workflows format', () => {
+    const descriptions = new Map([['audit', 'Security audit']]);
+    const result = formatUserHint(['audit'], descriptions);
+    expect(result).toContain('[Suggested workflows:');
+    expect(result).toContain('// audit');
   });
 });

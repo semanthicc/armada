@@ -444,18 +444,18 @@ export function formatAutoApplyHint(
     const triggerHint = triggers.length > 0 
       ? ` (matched: ${triggers.slice(0, 3).map(t => `"${t}"`).join(', ')})`
       : '';
-    return `↳ //\u200B${name}${triggerHint}\n↳ Desc: "${desc}"`;
+    return `↳ // ${name}${triggerHint}\n↳ Desc: "${desc}"`;
   });
 
-  return `${header}
+  return `[${header}
 ACTION_REQUIRED: IF matches user intent → get_workflow("name"), else SKIP
-${items.join('\n\n')}`;
+${items.join('\n\n')}]`;
 }
 
 export function formatAutoApplyHintLegacy(workflowNames: string[], descriptions: Map<string, string>): string {
   const items = workflowNames.map(name => {
     const desc = descriptions.get(name) || 'No description';
-    return `//\u200B${name} — "${desc}"`;
+    return `// ${name} — "${desc}"`;
   });
   return `[Auto-apply workflow (if relevant): ${items.join('; ')} — use get_workflow("name") to fetch or ignore if irrelevant]`;
 }
@@ -463,7 +463,7 @@ export function formatAutoApplyHintLegacy(workflowNames: string[], descriptions:
 export function formatUserHint(workflowNames: string[], descriptions: Map<string, string>): string {
   const items = workflowNames.map(name => {
     const desc = descriptions.get(name) || 'No description';
-    return `//\u200B${name} — "${desc}"`;
+    return `// ${name} — "${desc}"`;
   });
   return `[Suggested workflows: ${items.join('; ')}]`;
 }

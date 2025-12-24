@@ -1,5 +1,5 @@
-import { existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync, unlinkSync, renameSync } from 'fs';
-import { join, basename } from 'path';
+import { existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync, unlinkSync, renameSync, statSync } from 'fs';
+import { join, basename, relative } from 'path';
 import { homedir } from 'os';
 import type { Workflow, WorkflowConfig } from './types';
 import { parseFrontmatter } from './engine';
@@ -47,6 +47,38 @@ export function getWorkflowDirs(projectDir: string): { path: string; source: 'pr
   return dirs;
 }
 
+interface WorkflowFile {
+  filePath: string;
+  folder?: string;
+}
+
+export function walkDir(dir: string, baseDir: string = dir): WorkflowFile[] {
+  const results: WorkflowFile[] = [];
+  
+  try {
+    const entries = readdirSync(dir);
+    
+    for (const entry of entries) {
+      const fullPath = join(dir, entry);
+      const stat = statSync(fullPath);
+      
+      if (stat.isDirectory()) {
+        results.push(...walkDir(fullPath, baseDir));
+      } else if (entry.endsWith('.md')) {
+        const relDir = relative(baseDir, dir);
+        results.push({
+          filePath: fullPath,
+          folder: relDir || undefined
+        });
+      }
+    }
+  } catch (err) {
+    // Directory unreadable, skip
+  }
+  
+  return results;
+}
+
 export function getWorkflowPath(name: string, scope: 'project' | 'global', projectDir: string): string {
   const safeName = name.replace(/[^\p{L}\p{N}_-]/gu, '');
   if (!safeName) throw new Error(`Invalid workflow name: ${name}`);
@@ -71,11 +103,10 @@ export function loadWorkflows(projectDir: string): Map<string, Workflow> {
 
   for (const { path: dir, source } of dirs) {
     try {
-      const files = readdirSync(dir).filter((f: string) => f.endsWith('.md'));
-      for (const file of files) {
-        const name = basename(file, '.md');
+      const files = walkDir(dir);
+      for (const { filePath, folder } of files) {
+        const name = basename(filePath, '.md');
         if (!workflows.has(name)) {
-          const filePath = join(dir, file);
           const rawContent = readFileSync(filePath, 'utf-8');
           const { aliases, tags, agents, description, autoworkflow, workflowInWorkflow, body } = parseFrontmatter(rawContent);
           
@@ -89,7 +120,8 @@ export function loadWorkflows(projectDir: string): Map<string, Workflow> {
             workflowInWorkflow, 
             content: body, 
             source, 
-            path: filePath 
+            path: filePath,
+            folder
           };
           workflows.set(name, workflow);
           
@@ -139,4 +171,4 @@ export function readWorkflowContent(filePath: string): string {
   return readFileSync(filePath, 'utf-8');
 }
 
-export { existsSync, readFileSync, writeFileSync, unlinkSync, renameSync, mkdirSync, basename, join, homedir };
+export { existsSync, readFileSync, writeFileSync, unlinkSync, renameSync, mkdirSync, statSync, basename, join, relative, homedir };

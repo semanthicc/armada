@@ -62,17 +62,17 @@ And you type: "Can you check this code for security issues?"
 
 The plugin detects the matching tags and appends:
 ```
-⚡ Workflow matched.
+[⚡ Workflow matched.
 ACTION_REQUIRED: IF matches user intent → get_workflow("name"), else SKIP
-↳ //security-audit (matched: "security", "check")
-↳ Desc: "Security audit using OWASP Top 10"
+↳ // security-audit (matched: "security", "check")
+↳ Desc: "Security audit using OWASP Top 10"]
 ```
 
 The AI will automatically fetch and apply the workflow.
 
 For `autoworkflow: hintForUser`, the hint appears as:
 ```
-[Suggested workflows: //security-audit — "Security audit using OWASP Top 10"]
+[Suggested workflows: // security-audit — "Security audit using OWASP Top 10"]
 ```
 
 And the AI will suggest it to you without auto-applying.
@@ -121,6 +121,26 @@ Create `.md` files in one of these locations:
 | `~/.config/opencode/workflows/` | Global | Lower |
 
 Project workflows override global ones with the same name.
+
+### Organizing with Subfolders
+
+Workflows can be organized into subfolders for better organization:
+
+```
+~/.config/opencode/workflows/
+├── security/
+│   ├── audit.md          → //audit
+│   └── vulnerability.md  → //vulnerability
+├── review/
+│   ├── code-review.md    → //code-review
+│   └── pr-review.md      → //pr-review
+└── general.md            → //general
+```
+
+**Key points:**
+- Subfolder structure is for organization only - workflow names remain unique
+- Use `list_workflows` with `folder` filter to find workflows in specific folders
+- Workflows in subfolders show their folder path in listings
 
 ### Workflow File Format
 
@@ -213,7 +233,7 @@ Now `//cr`, `//review_commit`, and `//commit-review` all trigger the same workfl
 
 | Tool | Description |
 |------|-------------|
-| `list_workflows` | List all available workflows |
+| `list_workflows` | List all available workflows (supports filters) |
 | `get_workflow` | Get a specific workflow's content |
 | `create_workflow` | Create a new workflow with proper frontmatter |
 | `edit_workflow` | Edit an existing workflow |
@@ -221,6 +241,20 @@ Now `//cr`, `//review_commit`, and `//commit-review` all trigger the same workfl
 | `delete_workflow` | Delete a workflow |
 | `reload_workflows` | Reload workflows from disk |
 | `expand_workflows` | Manually expand `//mentions` in text |
+
+### list_workflows Arguments
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `tag` | No | Filter by tag (substring match) |
+| `name` | No | Filter by name (substring match) |
+| `folder` | No | Filter by folder (substring match) |
+| `scope` | No | Filter by scope (`global` or `project`) |
+
+**Examples:**
+- `list_workflows(folder="security")` - list workflows in `security/` subfolder
+- `list_workflows(tag="review")` - list workflows with "review" tag
+- `list_workflows(scope="project")` - list only project-specific workflows
 
 ### create_workflow Arguments
 

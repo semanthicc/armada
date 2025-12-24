@@ -27,6 +27,7 @@ export interface WorkflowInfo {
   content: string;
   source: 'project' | 'global';
   path: string;
+  folder?: string;
 }
 
 export interface WorkflowConfig {
