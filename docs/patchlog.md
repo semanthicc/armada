@@ -1,5 +1,17 @@
 # Patchlog
 
+## [1.0.3] - 2025-12-27
+
+### Added
+- `expand` frontmatter option - set `expand: false` to inject hint instead of full content (AI fetches on-demand)
+- `expandOrders` config option - global toggle for expansion behavior
+- 7 new tests covering expand option scenarios
+
+### Changed
+- Hint format updated to `[// name]` for better readability
+- Hint stripping now uses fingerprint-based detection (more robust recovery from corrupted hints)
+
+
 ## [1.0.2] - 2025-12-24
 
 ### Fixed

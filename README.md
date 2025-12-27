@@ -75,6 +75,7 @@ Do this thing...
 | `tags` | array | Keywords for auto-suggestion matching |
 | `automention` | `true` / `expanded` / `false` | Auto-suggestion mode (default: `true`) |
 | `orderInOrder` | `true` / `hints` / `false` | Nested order expansion mode (default: `false`) |
+| `expand` | `true` / `false` | Expand full content on mention or inject hint (default: `true`) |
 | `onlyFor` | array | Limit visibility to specific agents |
 | `spawnAt` | array | Inject when agent spawns (e.g., `[frontend:expanded]`) |
 
@@ -275,6 +276,25 @@ Orders can reference other orders:
 orderInOrder: true
 ```
 
+### Lazy Expansion (Hint Mode)
+
+For large orders, use `expand: false` to reduce context bloat:
+
+```yaml
+---
+expand: false
+---
+```
+
+When `expand: false` is set:
+- Instead of injecting full `<workflow>` content
+- Injects a hint: `[//name → call get_workflow("name") to read]`
+- AI fetches content on-demand when needed
+
+**Global toggle**: Set `expandOrders: false` in `captain.json` to make all orders hint-only by default.
+
+**Precedence**: Both `order.expand` AND `config.expandOrders` must be `true` for full expansion.
+
 ---
 
 ## Installation
@@ -302,9 +322,16 @@ Config file: `~/.config/opencode/captain.json`
 ```json
 {
   "deduplicateSameMessage": true,
-  "maxNestingDepth": 3
+  "maxNestingDepth": 3,
+  "expandOrders": true
 }
 ```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `deduplicateSameMessage` | boolean | `true` | Replace duplicate mentions with references |
+| `maxNestingDepth` | number | `3` | Max depth for nested order expansion |
+| `expandOrders` | boolean | `true` | Global toggle for order expansion (when `false`, all orders inject hints) |
 
 ---
 
