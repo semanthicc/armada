@@ -1,6 +1,6 @@
 # opencode-captain
 
-Captain your AI with **Orders**, **Rules**, and **Crew** - a unified prompt management system for OpenCode.
+Captain your AI with **Scrolls**, **Rules**, and **Crew** - a unified prompt management system for OpenCode.
 
 ## What is this?
 
@@ -8,7 +8,7 @@ opencode-captain is a plugin that manages three types of prompt templates:
 
 | Type | Trigger | Behavior | Use Case |
 |------|---------|----------|----------|
-| **Orders** | `//name` in messages | Expand on demand, toast notification | Dynamic workflows, review checklists |
+| **Scrolls** | `//name` in messages | Expand on demand, toast notification | Dynamic workflows, review checklists |
 | **Rules** | Automatic | Silent injection into system prompt | Coding standards, style guides |
 | **Crew** | Config hook | Register as OpenCode agents | Custom agents, specialists, delegates |
 
@@ -28,39 +28,40 @@ The plugin automatically:
 
 ---
 
-## Orders (Dynamic Workflows)
+## Scrolls (Dynamic Workflows)
 
-Orders are triggered explicitly with `//name` syntax in your messages.
+Scrolls are triggered explicitly with `//name` syntax in your messages.
 
 ### Folder Locations
 
 | Location | Scope | Priority |
 |----------|-------|----------|
-| `.opencode/orders/` | Project | Highest |
+| `.opencode/scrolls/` | Project | Highest |
 | `.opencode/workflows/` | Project | Highest |
 | `.opencode/commands/` | Project | Highest |
-| `~/.config/opencode/orders/` | Global | Lower |
+| `~/.config/opencode/scrolls/` | Global | Lower |
 | `~/.config/opencode/workflows/` | Global | Lower |
 | `~/.config/opencode/commands/` | Global | Lower |
 
-Project orders override global ones with the same name.
+Project scrolls override global ones with the same name.
 
-### Order File Format
+### Scroll File Format
 
-**`~/.config/opencode/orders/my-order.md`** -> `//my-order`
+**`~/.config/opencode/scrolls/my-scroll.md`** -> `//my-scroll`
 
 ```markdown
 ---
-description: "Short description of what this order does"
-shortcuts: [mo, my-o]
+description: "Short description of what this scroll does"
+shortcuts: [ms, my-s]
 tags: [review, check, analyze]
 automention: true
 onlyFor: [oracle, frontend]
-spawnAt: [frontend:expanded]
+spawnFor: [frontend:expanded]
+include: [docs/api-guide.md, shared/common-rules.md]
 ---
-# My Custom Order
+# My Custom Scroll
 
-Instructions for the AI to follow when this order is mentioned.
+Instructions for the AI to follow when this scroll is mentioned.
 
 ## Step 1
 Do this thing...
@@ -71,25 +72,26 @@ Do this thing...
 | Field | Type | Description |
 |-------|------|-------------|
 | `description` | string | Short description shown in catalog |
-| `shortcuts` / `aliases` | array | Alternative names to trigger this order |
+| `shortcuts` / `aliases` | array | Alternative names to trigger this scroll |
 | `tags` | array | Keywords for auto-suggestion matching |
 | `automention` | `true` / `expanded` / `false` | Auto-suggestion mode (default: `true`) |
-| `orderInOrder` | `true` / `hints` / `false` | Nested order expansion mode (default: `false`) |
+| `scrollInScroll` | `true` / `hints` / `false` | Nested scroll expansion mode (default: `false`) |
 | `expand` | `true` / `false` | Expand full content on mention or inject hint (default: `true`) |
 | `onlyFor` | array | Limit visibility to specific agents |
-| `spawnAt` | array | Inject when agent spawns (e.g., `[frontend:expanded]`) |
+| `spawnFor` | array | Inject when agent spawns (e.g., `[frontend:expanded]`) |
+| `include` | array | Files to merge before scroll content (see [File Inclusion](#file-inclusion)) |
 
-### Order Tools
+### Scroll Tools
 
 | Tool | Description |
 |------|-------------|
-| `list_workflows` | List all available orders |
-| `get_workflow` | Get a specific order's content |
-| `create_workflow` | Create a new order |
-| `edit_workflow` | Edit an existing order |
-| `rename_workflow` | Rename an order |
-| `delete_workflow` | Delete an order |
-| `reload_workflows` | Reload orders from disk |
+| `list_workflows` | List all available scrolls |
+| `get_workflow` | Get a specific scroll's content |
+| `create_workflow` | Create a new scroll |
+| `edit_workflow` | Edit an existing scroll |
+| `rename_workflow` | Rename a scroll |
+| `delete_workflow` | Delete a scroll |
+| `reload_workflows` | Reload scrolls from disk |
 | `expand_workflows` | Manually expand `//mentions` in text |
 
 ---
@@ -230,9 +232,34 @@ Task(agent="frontend-expert", prompt="Review this React component")
 
 ## Smart Features
 
+### File Inclusion
+
+Scrolls can include external files that get merged before the scroll content:
+
+```yaml
+---
+include: [docs/api-guide.md, shared/security-rules.md]
+---
+# My Scroll
+
+This content comes after the included files.
+```
+
+**Path resolution:**
+- Project-relative: `docs/api-guide.md` → `<project>/docs/api-guide.md`
+- Scroll-relative: `./sibling.md` or `../shared/file.md`
+- Absolute: `C:\Users\shared\file.md` or `/home/user/file.md`
+
+**Cross-platform:** Both Windows (`\`) and Unix (`/`) path separators work.
+
+**Behavior:**
+- Included files are merged in order, separated by `---`
+- Missing files produce warnings but don't crash
+- Inclusion happens at load time, not runtime
+
 ### Auto-Suggestions (Automention)
 
-Orders with `automention` enabled are suggested based on message content:
+Scrolls with `automention` enabled are suggested based on message content:
 
 | Mode | Behavior |
 |------|----------|
@@ -256,10 +283,10 @@ tags: [commit, [staged, changes], patchnote|patchlog]
 
 ### Agent Spawn Injection
 
-Orders can auto-inject when specific agents spawn:
+Scrolls can auto-inject when specific agents spawn:
 
 ```yaml
-spawnAt: [frontend:expanded, oracle]
+spawnFor: [frontend:expanded, oracle]
 ```
 
 ### Smart Deduplication
@@ -268,17 +295,17 @@ Repeated mentions become references:
 - First `//linus-torvalds` -> full expansion
 - Second `//linus-torvalds` -> `[use_workflow:linus-torvalds-abc1]`
 
-### Nested Orders
+### Nested Scrolls
 
-Orders can reference other orders:
+Scrolls can reference other scrolls:
 
 ```yaml
-orderInOrder: true
+scrollInScroll: true
 ```
 
 ### Lazy Expansion (Hint Mode)
 
-For large orders, use `expand: false` to reduce context bloat:
+For large scrolls, use `expand: false` to reduce context bloat:
 
 ```yaml
 ---
@@ -291,9 +318,9 @@ When `expand: false` is set:
 - Injects a hint: `[//name → call get_workflow("name") to read]`
 - AI fetches content on-demand when needed
 
-**Global toggle**: Set `expandOrders: false` in `captain.json` to make all orders hint-only by default.
+**Global toggle**: Set `expandScrolls: false` in `captain.json` to make all scrolls hint-only by default.
 
-**Precedence**: Both `order.expand` AND `config.expandOrders` must be `true` for full expansion.
+**Precedence**: Both `scroll.expand` AND `config.expandScrolls` must be `true` for full expansion.
 
 ---
 
@@ -323,31 +350,31 @@ Config file: `~/.config/opencode/captain.json`
 {
   "deduplicateSameMessage": true,
   "maxNestingDepth": 3,
-  "expandOrders": true
+  "expandScrolls": true
 }
 ```
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `deduplicateSameMessage` | boolean | `true` | Replace duplicate mentions with references |
-| `maxNestingDepth` | number | `3` | Max depth for nested order expansion |
-| `expandOrders` | boolean | `true` | Global toggle for order expansion (when `false`, all orders inject hints) |
+| `maxNestingDepth` | number | `3` | Max depth for nested scroll expansion |
+| `expandScrolls` | boolean | `true` | Global toggle for scroll expansion (when `false`, all scrolls inject hints) |
 
 ---
 
-## Migration from opencode-workflows
+## Backwards Compatibility
 
-opencode-captain is fully backward compatible:
+All legacy terminology still works:
 
-1. All existing workflow files work as-is
-2. `workflows/` and `commands/` folders are still recognized
-3. All workflow tools (`list_workflows`, etc.) continue to work
-4. Simply rename the plugin in your `opencode.json`
+| Legacy | Current | Status |
+|--------|---------|--------|
+| `Order` | `Scroll` | ✅ Alias |
+| `orders/` | `scrolls/` | ✅ Both recognized |
+| `orderInOrder` | `scrollInScroll` | ✅ Both parsed |
+| `spawnAt` | `spawnFor` | ✅ Both parsed |
+| `expandOrders` | `expandScrolls` | ✅ Both work |
 
-**New capabilities:**
-- Rules for silent constraint injection
-- Crew for custom agent definitions
-- Unified architecture
+All existing workflow files work as-is. No migration required.
 
 ---
 
