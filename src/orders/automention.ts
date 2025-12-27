@@ -1,6 +1,6 @@
 import type { TagOrGroup, Theme } from '../core/types';
 import type { Order } from './types';
-import { isOrGroup, matchesTagItem, isSequenceTag, matchesSequenceTag, hasSequenceSyntax, parseSequenceTag } from '../core/matcher';
+import { isOrGroup, matchesTagItem, isSequenceTag, matchesSequenceTag, hasSequenceSyntax, parseSequenceTag, matchesWord } from '../core/matcher';
 import { extractOrderReferences } from './engine';
 import { getMessage } from '../core/config';
 
@@ -70,7 +70,7 @@ export function findMatchingAutoOrders(
         const allInGroup = tag.every(t => {
           const matched = matchesTagItem(t, contentForMatching);
           if (matched) {
-            const keyword = typeof t === 'string' ? t : (t as TagOrGroup).or.find(o => contentForMatching.includes(o.toLowerCase())) || '';
+            const keyword = typeof t === 'string' ? t : (t as TagOrGroup).or.find(o => matchesWord(contentForMatching, o.toLowerCase())) || '';
             if (keyword) groupKeywords.push(keyword);
           }
           return matched;
@@ -80,7 +80,7 @@ export function findMatchingAutoOrders(
           keywords.push(...groupKeywords);
         }
       } else if (isOrGroup(tag)) {
-        const matched = tag.or.find(t => contentForMatching.includes(t.toLowerCase()));
+        const matched = tag.or.find(t => matchesWord(contentForMatching, t.toLowerCase()));
         if (matched) {
           singleMatches++;
           keywords.push(matched);
@@ -88,12 +88,12 @@ export function findMatchingAutoOrders(
       } else if (typeof tag === 'string') {
         if (tag.includes('|')) {
           const parts = tag.split('|').map(s => s.trim());
-          const matched = parts.find(part => contentForMatching.includes(part.toLowerCase()));
+          const matched = parts.find(part => matchesWord(contentForMatching, part.toLowerCase()));
           if (matched) {
             singleMatches++;
             keywords.push(matched);
           }
-        } else if (contentForMatching.includes(tag.toLowerCase())) {
+        } else if (matchesWord(contentForMatching, tag.toLowerCase())) {
           singleMatches++;
           keywords.push(tag);
         }

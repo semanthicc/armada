@@ -1026,6 +1026,92 @@ describe('findMatchingAutoWorkflows', () => {
   });
 });
 
+describe('findMatchingAutoOrders - Word Boundary Bug', () => {
+  test('REAL BUG: debug_protocol should NOT match on "debugger" and "would" substrings', () => {
+    // This is the EXACT user message that triggered the false positive
+    const userMessage = `ok, last one = spawnWith are we spawning it also with format extended or hinted
+and would be nice to add docs spawn support inside of our workflows? cuz what if i want my both debugger and frontend coder to know svelte [5] tips but then i would have to put it in both agents separatelly or more handy just in 1 workflow mention them both?
+also what about synchronization? with conflict resolution so it would pickup which one was edited mentioning what agent should be spawned and in synch showcase in both agent.md and in workflow.md spawnWith / spawnFor ?
+think as linus [5 approaches], is it a nice flow`;
+
+    const debugWorkflow = createMockOrder({
+      name: 'debug_protocol',
+      tags: [['do', 'debug']],  // This is what the real workflow likely has
+      description: 'Inspect staged changes before commit',
+      automention: 'true'
+    });
+    
+    const result = findMatchingAutoOrders(userMessage, [debugWorkflow]);
+    
+    // BUG: Currently this WRONGLY matches because:
+    // - "would" contains "do" 
+    // - "debugger" contains "debug"
+    // But neither "do" nor "debug" appear as standalone words!
+    expect(result.autoApply).not.toContain('debug_protocol');
+  });
+
+  test('BUG: "debug" tag should NOT match "debugger" substring', () => {
+    const debugWorkflow = createMockOrder({
+      name: 'debug_protocol',
+      tags: ['debug'],
+      description: 'Inspect staged changes',
+      automention: 'true'
+    });
+    
+    const result = findMatchingAutoOrders(
+      'my debugger is broken',
+      [debugWorkflow]
+    );
+    expect(result.autoApply).not.toContain('debug_protocol');
+  });
+
+  test('BUG: "do" tag should NOT match "would" substring', () => {
+    const doWorkflow = createMockOrder({
+      name: 'do-task',
+      tags: ['do', 'task'],
+      description: 'Do a task',
+      automention: 'true'
+    });
+    
+    const result = findMatchingAutoOrders(
+      'would you help me?',
+      [doWorkflow]
+    );
+    expect(result.autoApply).not.toContain('do-task');
+  });
+
+  test('BUG: tags in AND group should use word-boundary matching', () => {
+    const debugWorkflow = createMockOrder({
+      name: 'debug_protocol',
+      tags: [['do', 'debug']],
+      description: 'Debug protocol',
+      automention: 'true'
+    });
+    
+    // "would" contains "do", "debugger" contains "debug" - but should NOT match
+    const result = findMatchingAutoOrders(
+      'would you fix my debugger',
+      [debugWorkflow]
+    );
+    expect(result.autoApply).not.toContain('debug_protocol');
+  });
+
+  test('tags should still match when used as full words', () => {
+    const debugWorkflow = createMockOrder({
+      name: 'debug_protocol',
+      tags: ['debug', 'inspect'],
+      description: 'Debug protocol',
+      automention: 'true'
+    });
+    
+    const result = findMatchingAutoOrders(
+      'debug and inspect this code',
+      [debugWorkflow]
+    );
+    expect(result.autoApply).toContain('debug_protocol');
+  });
+});
+
 describe('extractWorkflowReferences', () => {
   // Using imported extractOrderReferences (aliased as extractWorkflowReferences)
 

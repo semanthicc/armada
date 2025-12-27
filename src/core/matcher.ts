@@ -4,6 +4,24 @@ export function normalize(s: string): string {
   return s.toLowerCase().replace(/[-_]/g, '');
 }
 
+export function matchesWord(content: string, word: string): boolean {
+  const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const regex = new RegExp(`\\b${escaped}\\b`, 'i');
+  return regex.test(content);
+}
+
+export function findWordPosition(content: string, word: string, afterPos = -1): number {
+  const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const regex = new RegExp(`\\b${escaped}\\b`, 'gi');
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(content)) !== null) {
+    if (match.index > afterPos) {
+      return match.index;
+    }
+  }
+  return -1;
+}
+
 export function findByName(input: string, candidates: string[]): string | null {
   const exactMatch = candidates.find(c => c === input);
   if (exactMatch) return exactMatch;
@@ -40,11 +58,11 @@ export function matchesTagItem(item: string | TagOrGroup, lowerContent: string):
   if (typeof item === 'string') {
     if (item.includes('|')) {
       const parts = item.split('|').map(s => s.trim().toLowerCase());
-      return parts.some(part => lowerContent.includes(part));
+      return parts.some(part => matchesWord(lowerContent, part));
     }
-    return lowerContent.includes(item.toLowerCase());
+    return matchesWord(lowerContent, item.toLowerCase());
   } else if (isOrGroup(item)) {
-    return item.or.some(sub => lowerContent.includes(sub.toLowerCase()));
+    return item.or.some(sub => matchesWord(lowerContent, sub.toLowerCase()));
   }
   return false;
 }
@@ -101,22 +119,19 @@ function findStepInContent(
   content: string,
   afterPos: number
 ): { position: number; keyword: string } | null {
-  const searchContent = content.slice(afterPos + 1);
-  const offset = afterPos + 1;
-
   if (step.type === 'word') {
     const word = step.values[0];
-    const pos = searchContent.indexOf(word);
+    const pos = findWordPosition(content, word, afterPos);
     if (pos === -1) return null;
-    return { position: offset + pos, keyword: word };
+    return { position: pos, keyword: word };
   }
 
   if (step.type === 'or') {
     let bestMatch: { position: number; keyword: string } | null = null;
     for (const word of step.values) {
-      const pos = searchContent.indexOf(word);
+      const pos = findWordPosition(content, word, afterPos);
       if (pos !== -1 && (bestMatch === null || pos < bestMatch.position)) {
-        bestMatch = { position: offset + pos, keyword: word };
+        bestMatch = { position: pos, keyword: word };
       }
     }
     return bestMatch;
@@ -126,9 +141,9 @@ function findStepInContent(
     let maxPos = -1;
     const matchedKeywords: string[] = [];
     for (const word of step.values) {
-      const pos = searchContent.indexOf(word);
+      const pos = findWordPosition(content, word, afterPos);
       if (pos === -1) return null;
-      if (offset + pos > maxPos) maxPos = offset + pos;
+      if (pos > maxPos) maxPos = pos;
       matchedKeywords.push(word);
     }
     return { position: maxPos, keyword: matchedKeywords.join('+') };
