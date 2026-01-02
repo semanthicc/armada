@@ -1,175 +1,138 @@
-import { getCurrentProject, registerProject } from "./hooks/project-detect";
+import type { Plugin, PluginInput } from "@opencode-ai/plugin";
+import { tool } from "@opencode-ai/plugin";
+import { getCurrentProject } from "./hooks/project-detect";
 import { getHeuristicsContext } from "./hooks/heuristics-injector";
 import { addMemory, deleteMemory, listMemories } from "./heuristics";
 import { indexProject, getIndexStats } from "./indexer";
 import { searchCode, formatSearchResultsForTool } from "./search";
 
-export const name = "semanthicc";
-
 export type * from "./types";
-export * from "./heuristics";
-export * from "./hooks/project-detect";
-export * from "./hooks/heuristics-injector";
-export * from "./embeddings";
-export * from "./indexer";
-export * from "./search";
 
-interface PluginContext {
-  directory: string;
-}
+export const SemanthiccPlugin: Plugin = async (ctx: PluginInput) => {
+  const { directory } = ctx;
 
-interface SystemTransformInput {
-  messages: unknown[];
-}
-
-interface SystemTransformOutput {
-  system: string[];
-}
-
-type Plugin = (context: PluginContext) => Promise<PluginDefinition>;
-
-interface PluginDefinition {
-  name: string;
-  "experimental.chat.system.transform"?: (
-    input: SystemTransformInput,
-    output: SystemTransformOutput
-  ) => Promise<void>;
-  tool?: Record<string, unknown>;
-}
-
-interface ToolParams {
-  action: "search" | "index" | "status" | "remember" | "forget" | "list";
-  query?: string;
-  type?: string;
-  domain?: string;
-  global?: boolean;
-  id?: number;
-  limit?: number;
-}
-
-const semanthiccPlugin: Plugin = async ({ directory }) => {
   return {
     name: "semanthicc",
 
-    "experimental.chat.system.transform": async (_input, output) => {
-      const project = getCurrentProject(directory);
-      const heuristicsContext = getHeuristicsContext(project?.id ?? null);
+    "chat.params": async (params: Record<string, unknown>) => {
+      try {
+        const input = params.input as Record<string, unknown> | undefined;
+        if (!input) return;
 
-      if (heuristicsContext) {
-        output.system.push(heuristicsContext);
+        const project = getCurrentProject(directory);
+        const heuristicsContext = getHeuristicsContext(project?.id ?? null);
+
+        if (heuristicsContext) {
+          const existingSystemPrompt = (input.systemPrompt as string) || "";
+          input.systemPrompt = existingSystemPrompt + "\n\n" + heuristicsContext;
+        }
+      } catch (error) {
+        console.error("Semanthicc: Error in chat.params hook", error);
+      }
+    },
+
+    "experimental.chat.system.transform": async (
+      _input: { agent?: string },
+      output: { system: string[] }
+    ) => {
+      try {
+        const project = getCurrentProject(directory);
+        const heuristicsContext = getHeuristicsContext(project?.id ?? null);
+
+        if (heuristicsContext && !output.system.some(s => s.includes("<project-heuristics>"))) {
+          output.system.push(heuristicsContext);
+        }
+      } catch (error) {
+        console.error("Semanthicc: Error in system.transform hook", error);
       }
     },
 
     tool: {
-      semanthicc: {
-        name: "semanthicc",
-        description: "Semantic code search and memory management",
-        parameters: {
-          type: "object",
-          properties: {
-            action: {
-              type: "string",
-              enum: ["search", "index", "status", "remember", "forget", "list"],
-              description: "Action: search code, index project, check status, or manage heuristics",
-            },
-            query: {
-              type: "string",
-              description: "Search query or content to remember",
-            },
-            type: {
-              type: "string",
-              enum: ["pattern", "decision", "constraint", "learning", "context"],
-              description: "Type of memory (for 'remember' action)",
-            },
-            domain: {
-              type: "string",
-              description: "Domain tag (e.g., 'typescript', 'testing')",
-            },
-            global: {
-              type: "boolean",
-              description: "Make this a global memory (applies to all projects)",
-            },
-            id: {
-              type: "number",
-              description: "Memory ID (for 'forget' action)",
-            },
-            limit: {
-              type: "number",
-              description: "Max results (for 'search' and 'list' actions)",
-            },
-          },
-          required: ["action"],
+      semanthicc: tool({
+        description: "Semantic code search and memory management. Actions: search (find code by meaning), index (index project for search), status (check index), remember (add pattern/heuristic), forget (remove memory), list (show memories)",
+        args: {
+          action: tool.schema
+            .enum(["search", "index", "status", "remember", "forget", "list"])
+            .describe("Action to perform"),
+          query: tool.schema
+            .string()
+            .describe("Search query or content to remember")
+            .optional(),
+          type: tool.schema
+            .enum(["pattern", "decision", "constraint", "learning", "context", "rule"])
+            .describe("Type of memory (for remember action)")
+            .optional(),
+          domain: tool.schema
+            .string()
+            .describe("Domain tag (e.g., typescript, testing)")
+            .optional(),
+          global: tool.schema
+            .boolean()
+            .describe("Make this a global memory (applies to all projects)")
+            .optional(),
+          id: tool.schema
+            .number()
+            .describe("Memory ID (for forget action)")
+            .optional(),
+          limit: tool.schema
+            .number()
+            .describe("Max results (default 5)")
+            .optional(),
         },
-        execute: async (params: ToolParams) => {
-          const { action, query, type, domain, global, id, limit = 5 } = params;
+        async execute(args) {
+          const { action, query, type, domain, global: isGlobal, id, limit = 5 } = args;
           const project = getCurrentProject(directory);
 
           switch (action) {
             case "search": {
               if (!query) {
-                return { error: "Query is required for search" };
+                return "Error: Query is required for search";
               }
               if (!project) {
-                return { error: "No project found. Run 'index' first." };
+                return "Error: No project found. Run 'index' action first.";
               }
               const stats = getIndexStats(project.id);
               if (stats.chunkCount === 0) {
-                return { error: "Project not indexed. Run 'index' first." };
+                return "Error: Project not indexed. Run 'index' action first.";
               }
               const results = await searchCode(query, project.id, limit);
-              return { 
-                results: formatSearchResultsForTool(results),
-                count: results.length,
-              };
+              return formatSearchResultsForTool(results);
             }
 
             case "index": {
               const result = await indexProject(directory, {
                 projectName: directory.split(/[/\\]/).pop(),
               });
-              return {
-                success: true,
-                filesIndexed: result.filesIndexed,
-                chunksCreated: result.chunksCreated,
-                durationMs: result.durationMs,
-              };
+              return `Indexed ${result.filesIndexed} files, created ${result.chunksCreated} chunks in ${result.durationMs}ms`;
             }
 
             case "status": {
               if (!project) {
-                return { indexed: false, message: "Project not registered" };
+                return "Project not registered. Run 'index' to register and index.";
               }
               const stats = getIndexStats(project.id);
-              return {
-                indexed: stats.chunkCount > 0,
-                projectId: project.id,
-                projectPath: project.path,
-                chunkCount: stats.chunkCount,
-                fileCount: stats.fileCount,
-                staleCount: stats.staleCount,
-                lastIndexedAt: stats.lastIndexedAt,
-              };
+              return `Project: ${project.path}\nIndexed: ${stats.chunkCount > 0 ? "Yes" : "No"}\nChunks: ${stats.chunkCount}\nFiles: ${stats.fileCount}\nStale: ${stats.staleCount}`;
             }
 
             case "remember": {
               if (!query) {
-                return { error: "Content is required for remember" };
+                return "Error: Content is required for remember";
               }
               const memory = addMemory({
                 content: query,
-                concept_type: (type as "pattern" | "decision" | "constraint" | "learning" | "context") ?? "pattern",
+                concept_type: (type as "pattern" | "decision" | "constraint" | "learning" | "context" | "rule") ?? "pattern",
                 domain,
-                project_id: global ? null : project?.id ?? null,
+                project_id: isGlobal ? null : project?.id ?? null,
               });
-              return { success: true, id: memory.id };
+              return `Memory saved with ID ${memory.id}. ${isGlobal ? "(global)" : "(project-specific)"}`;
             }
 
             case "forget": {
               if (!id) {
-                return { error: "Memory ID is required for forget" };
+                return "Error: Memory ID is required for forget";
               }
               const deleted = deleteMemory(id);
-              return { success: deleted };
+              return deleted ? `Memory ${id} deleted.` : `Memory ${id} not found.`;
             }
 
             case "list": {
@@ -178,25 +141,25 @@ const semanthiccPlugin: Plugin = async ({ directory }) => {
                 domain,
                 limit,
               });
-              return {
-                memories: memories.map(m => ({
-                  id: m.id,
-                  type: m.concept_type,
-                  content: m.content,
-                  confidence: m.effectiveConfidence.toFixed(2),
-                  domain: m.domain,
-                  isGlobal: m.project_id === null,
-                })),
-              };
+              if (memories.length === 0) {
+                return "No memories found.";
+              }
+              return memories
+                .map((m) => {
+                  const scope = m.project_id === null ? "[global]" : "";
+                  const golden = m.is_golden ? "⭐" : "";
+                  return `${golden}${scope} [${m.effectiveConfidence.toFixed(2)}] ${m.concept_type}: ${m.content}`;
+                })
+                .join("\n");
             }
 
             default:
-              return { error: `Unknown action: ${action}` };
+              return `Error: Unknown action: ${action}`;
           }
         },
-      },
+      }),
     },
   };
 };
 
-export default semanthiccPlugin;
+export default SemanthiccPlugin;

@@ -3,7 +3,7 @@ import { getDb, resetDb } from "./db";
 import { join } from "node:path";
 import { unlinkSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
-import semanthiccPlugin from "./index";
+import { SemanthiccPlugin } from "./index";
 import { registerProject } from "./hooks/project-detect";
 import { addMemory } from "./heuristics";
 
@@ -18,15 +18,25 @@ function cleanupTestDb(): void {
   if (testDbPath && existsSync(testDbPath)) {
     try {
       unlinkSync(testDbPath);
-      const walPath = `${testDbPath}-wal`;
-      const shmPath = `${testDbPath}-shm`;
-      if (existsSync(walPath)) unlinkSync(walPath);
-      if (existsSync(shmPath)) unlinkSync(shmPath);
-    } catch {
-      // Windows file lock
-    }
+      unlinkSync(`${testDbPath}-wal`);
+      unlinkSync(`${testDbPath}-shm`);
+    } catch {}
   }
 }
+
+function mockPluginInput(directory: string) {
+  return {
+    directory,
+    client: {} as never,
+    project: "" as never,
+    worktree: "" as never,
+    serverUrl: "" as never,
+    $: {} as never,
+  };
+}
+
+type ChatParamsHook = (params: Record<string, unknown>) => Promise<void>;
+type SystemTransformHook = (input: Record<string, unknown>, output: { system: string[] }) => Promise<void>;
 
 describe("Plugin", () => {
   beforeEach(() => {
@@ -39,18 +49,19 @@ describe("Plugin", () => {
   });
 
   test("exports plugin function", () => {
-    expect(typeof semanthiccPlugin).toBe("function");
+    expect(typeof SemanthiccPlugin).toBe("function");
   });
 
   test("plugin returns correct structure", async () => {
-    const plugin = await semanthiccPlugin({ directory: "/test" });
+    const plugin = await SemanthiccPlugin(mockPluginInput("/test"));
     
-    expect(plugin.name).toBe("semanthicc");
+    expect(plugin["chat.params"]).toBeDefined();
     expect(plugin["experimental.chat.system.transform"]).toBeDefined();
     expect(plugin.tool).toBeDefined();
+    expect(plugin.tool?.semanthicc).toBeDefined();
   });
 
-  test("system transform injects heuristics", async () => {
+  test("chat.params injects heuristics into systemPrompt", async () => {
     const project = registerProject("/test/project", "Test");
     addMemory({
       concept_type: "pattern",
@@ -58,39 +69,71 @@ describe("Plugin", () => {
       project_id: project.id,
     });
 
-    const plugin = await semanthiccPlugin({ directory: "/test/project" });
-    const output = { system: [] as string[] };
+    const plugin = await SemanthiccPlugin(mockPluginInput("/test/project"));
+    const params = { input: { systemPrompt: "Base prompt" } };
     
-    await plugin["experimental.chat.system.transform"]!({ messages: [] }, output);
+    const chatParams = plugin["chat.params"] as unknown as ChatParamsHook;
+    await chatParams(params);
     
-    expect(output.system.length).toBe(1);
-    expect(output.system[0]).toContain("Always use TypeScript strict mode");
-    expect(output.system[0]).toContain("<project-heuristics>");
+    const systemPrompt = params.input.systemPrompt as string;
+    expect(systemPrompt).toContain("Always use TypeScript strict mode");
+    expect(systemPrompt).toContain("<project-heuristics>");
   });
 
-  test("system transform includes global heuristics", async () => {
+  test("experimental.chat.system.transform injects heuristics", async () => {
+    const project = registerProject("/test/project2", "Test2");
+    addMemory({
+      concept_type: "pattern",
+      content: "Use bun:sqlite always",
+      project_id: project.id,
+    });
+
+    const plugin = await SemanthiccPlugin(mockPluginInput("/test/project2"));
+    const output = { system: [] as string[] };
+    
+    const transform = plugin["experimental.chat.system.transform"] as unknown as SystemTransformHook;
+    await transform({}, output);
+    
+    expect(output.system.length).toBe(1);
+    expect(output.system[0]).toContain("Use bun:sqlite always");
+  });
+
+  test("chat.params includes global heuristics", async () => {
     addMemory({
       concept_type: "rule",
       content: "Never use any type",
       project_id: null,
     });
 
-    const plugin = await semanthiccPlugin({ directory: "/unknown/path" });
-    const output = { system: [] as string[] };
+    const plugin = await SemanthiccPlugin(mockPluginInput("/unknown/path"));
+    const params = { input: { systemPrompt: "" } };
     
-    await plugin["experimental.chat.system.transform"]!({ messages: [] }, output);
+    const chatParams = plugin["chat.params"] as unknown as ChatParamsHook;
+    await chatParams(params);
     
-    expect(output.system.length).toBe(1);
-    expect(output.system[0]).toContain("[global]");
-    expect(output.system[0]).toContain("Never use any type");
+    const systemPrompt = params.input.systemPrompt as string;
+    expect(systemPrompt).toContain("[global]");
+    expect(systemPrompt).toContain("Never use any type");
   });
 
-  test("system transform skips when no heuristics", async () => {
-    const plugin = await semanthiccPlugin({ directory: "/empty/project" });
-    const output = { system: [] as string[] };
+  test("chat.params skips when no heuristics", async () => {
+    const plugin = await SemanthiccPlugin(mockPluginInput("/empty/project"));
+    const params = { input: { systemPrompt: "Original" } };
     
-    await plugin["experimental.chat.system.transform"]!({ messages: [] }, output);
+    const chatParams = plugin["chat.params"] as unknown as ChatParamsHook;
+    await chatParams(params);
     
-    expect(output.system.length).toBe(0);
+    expect(params.input.systemPrompt).toBe("Original");
+  });
+
+  test("experimental.chat.system.transform skips when no heuristics", async () => {
+    const plugin = await SemanthiccPlugin(mockPluginInput("/empty/project2"));
+    const output = { system: ["existing"] };
+    
+    const transform = plugin["experimental.chat.system.transform"] as unknown as SystemTransformHook;
+    await transform({}, output);
+    
+    expect(output.system.length).toBe(1);
+    expect(output.system[0]).toBe("existing");
   });
 });
