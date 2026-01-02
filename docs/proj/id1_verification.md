@@ -1,275 +1,540 @@
 # Verification Guide: Semanthicc OpenCode Integration
 
-> Step-by-step guide to verify MVP-1 (Heuristics) and MVP-2 (Semantic Search) work in OpenCode
-
-## Prerequisites
-
-- [ ] OpenCode installed and working
-- [ ] Bun runtime installed
-- [ ] This repo cloned and built (`bun run build`)
+> Exact step-by-step verification with expected outputs for every action
 
 ---
 
-## Phase 1: Build Verification
+## Quick Answers
 
-### Step 1.1: Verify Build Output
+**Q: Where is the database?**
+- Windows: `C:\Users\<you>\AppData\Local\semanthicc\semanthicc.db`
+- Linux/macOS: `~/.local/share/semanthicc/semanthicc.db`
 
-```bash
-cd C:\ocPlugins\repos\opencode-semanthicc
-bun run build
+**Q: How do I know heuristics are being injected?**
+- Start a new conversation → check if `<project-heuristics>` block appears
+- Or ask: "Show me the system prompt" (some models can reflect this)
+
+**Q: How do I create the database?**
+- It's created automatically on first tool use (remember, index, etc.)
+
+**Q: How do I see what the AI sees?**
+- The heuristics are injected silently - you'll see them affect behavior
+- Use the `list` action to see what's stored
+
+---
+
+## TEST 1: Plugin Loading
+
+### Step 1.1: Restart OpenCode
+
+Close OpenCode completely, then reopen it.
+
+### Step 1.2: Check for Errors
+
+Look at terminal output when OpenCode starts. 
+
+**SUCCESS**: No errors mentioning "semanthicc"
+**FAILURE**: `Error loading plugin semanthicc: ...`
+
+### Step 1.3: Verify Tool Exists
+
+In OpenCode, type:
+```
+What tools do you have available?
+```
+
+**SUCCESS**: List includes `semanthicc` with actions: search, index, status, remember, forget, list
+**FAILURE**: `semanthicc` not in list → plugin didn't load
+
+---
+
+## TEST 2: Database Creation
+
+### Step 2.1: Check Database Doesn't Exist Yet
+
+```powershell
+# Windows PowerShell
+Test-Path "$env:LOCALAPPDATA\semanthicc\semanthicc.db"
+```
+
+**Expected**: `False` (doesn't exist yet)
+
+### Step 2.2: Trigger Database Creation
+
+In OpenCode, say:
+```
+Use the semanthicc tool with action "status"
+```
+
+**Expected Output**:
+```json
+{
+  "indexed": false,
+  "message": "Project not registered"
+}
+```
+
+### Step 2.3: Verify Database Created
+
+```powershell
+# Windows PowerShell
+Test-Path "$env:LOCALAPPDATA\semanthicc\semanthicc.db"
+dir "$env:LOCALAPPDATA\semanthicc"
 ```
 
 **Expected**: 
-- `dist/index.js` exists
-- No build errors
-- Output shows `1.42 MB` (includes ONNX runtime)
-
-### Step 1.2: Verify Tests Pass
-
-```bash
-bun run test
 ```
-
-**Expected**: `55 pass` (0 fail)
-
-### Step 1.3: Verify Typecheck
-
-```bash
-bun run typecheck
+True
+semanthicc.db
+semanthicc.db-shm  (maybe)
+semanthicc.db-wal  (maybe)
 ```
-
-**Expected**: No errors
 
 ---
 
-## Phase 2: Plugin Registration
+## TEST 3: Remember Action (Add Heuristic)
 
-### Step 2.1: Locate OpenCode Config
+### Step 3.1: Add Project-Specific Pattern
 
-Find your `opencode.json` or config location:
+```
+Use semanthicc tool to remember: "Always use bun:sqlite in this project" with type "pattern" and domain "database"
+```
 
-| Platform | Path |
-|----------|------|
-| Windows | `%USERPROFILE%\.config\opencode\opencode.json` |
-| Linux/macOS | `~/.config/opencode/opencode.json` |
-
-### Step 2.2: Add Plugin Entry
-
-Add to `opencode.json`:
-
+**Expected Output**:
 ```json
 {
-  "plugins": {
-    "semanthicc": {
-      "path": "C:\\ocPlugins\\repos\\opencode-semanthicc\\dist\\index.js"
-    }
-  }
+  "success": true,
+  "id": 1
 }
 ```
 
-Or for development (use source directly):
+### Step 3.2: Verify in Database
 
+```powershell
+sqlite3 "$env:LOCALAPPDATA\semanthicc\semanthicc.db" "SELECT id, concept_type, content, confidence, project_id FROM memories"
+```
+
+**Expected**:
+```
+1|pattern|Always use bun:sqlite in this project|0.5|1
+```
+
+### Step 3.3: Add Global Pattern
+
+```
+Use semanthicc tool to remember: "Never use any type in TypeScript" with type "rule" and global true
+```
+
+**Expected Output**:
 ```json
 {
-  "plugins": {
-    "semanthicc": {
-      "path": "C:\\ocPlugins\\repos\\opencode-semanthicc\\src\\index.ts"
-    }
-  }
+  "success": true,
+  "id": 2
 }
 ```
 
-### Step 2.3: Restart OpenCode
+### Step 3.4: Verify Global in Database
 
-Close and reopen OpenCode to load the plugin.
+```powershell
+sqlite3 "$env:LOCALAPPDATA\semanthicc\semanthicc.db" "SELECT id, content, project_id FROM memories WHERE id=2"
+```
+
+**Expected** (project_id is NULL for global):
+```
+2|Never use any type in TypeScript|
+```
 
 ---
 
-## Phase 3: Heuristics Verification (MVP-1)
+## TEST 4: List Action
 
-### Step 3.1: Add a Test Heuristic
-
-In OpenCode, ask the AI to use the tool:
+### Step 4.1: List All Memories
 
 ```
-Use the semanthicc tool to remember this pattern: "Always use bun:sqlite instead of better-sqlite3 in this project" with domain "database"
+Use semanthicc tool with action "list"
 ```
 
-**Expected**: Tool returns `{ success: true, id: 1 }`
+**Expected Output**:
+```json
+{
+  "memories": [
+    {
+      "id": 1,
+      "type": "pattern",
+      "content": "Always use bun:sqlite in this project",
+      "confidence": "0.50",
+      "domain": "database",
+      "isGlobal": false
+    },
+    {
+      "id": 2,
+      "type": "rule", 
+      "content": "Never use any type in TypeScript",
+      "confidence": "0.50",
+      "domain": null,
+      "isGlobal": true
+    }
+  ]
+}
+```
 
-### Step 3.2: List Heuristics
+### Step 4.2: List with Domain Filter
 
 ```
-Use semanthicc tool to list all memories
+Use semanthicc tool with action "list" and domain "database"
 ```
 
-**Expected**: Shows the pattern you just added with confidence `0.50`
+**Expected**: Only shows memories with domain "database"
 
-### Step 3.3: Verify Auto-Injection
+---
 
-Start a **new conversation** in the same project directory.
+## TEST 5: Heuristics Auto-Injection
 
-**Expected**: The system prompt should contain:
+### Step 5.1: Start New Conversation
+
+**IMPORTANT**: Start a completely new conversation/session in OpenCode (not just a new message).
+
+### Step 5.2: Ask AI What It Knows
+
+```
+Do you have any project-specific patterns or heuristics you should follow?
+```
+
+**SUCCESS**: AI mentions the patterns you added
+**ALTERNATIVE**: AI behavior reflects the patterns even without mentioning them
+
+### Step 5.3: Verify Injection Format
+
+The AI receives this in system prompt (you won't see it directly):
 ```
 <project-heuristics>
 ## Learned Patterns (confidence-ranked)
-- [0.50] Always use bun:sqlite instead of better-sqlite3 in this project
+- [global] [0.50] Never use any type in TypeScript
+- [0.50] Always use bun:sqlite in this project
 </project-heuristics>
 ```
 
-### Step 3.4: Add Global Heuristic
+### Step 5.4: Test Behavioral Impact
 
+Ask the AI to write some code:
 ```
-Use semanthicc to remember globally: "Never use as any in TypeScript" with type "rule"
+Write a function to connect to SQLite database
 ```
 
-**Expected**: Tool returns success, and this pattern appears with `[global]` tag in new sessions.
+**SUCCESS**: AI uses `bun:sqlite` (not `better-sqlite3`)
+**FAILURE**: AI uses different library → heuristic not injected
 
 ---
 
-## Phase 4: Semantic Search Verification (MVP-2)
+## TEST 6: Index Action (Semantic Search Setup)
 
-### Step 4.1: Index Current Project
+### Step 6.1: Index Current Project
+
+Make sure you're in the semanthicc project directory, then:
+```
+Use semanthicc tool with action "index"
+```
+
+**Expected Output**:
+```json
+{
+  "success": true,
+  "filesIndexed": 17,
+  "chunksCreated": 35,
+  "durationMs": 8500
+}
+```
+
+(Numbers vary - first run is slow due to model download)
+
+### Step 6.2: Verify Index in Database
+
+```powershell
+sqlite3 "$env:LOCALAPPDATA\semanthicc\semanthicc.db" "SELECT COUNT(*) FROM embeddings"
+```
+
+**Expected**: Number > 0 (e.g., `35`)
+
+### Step 6.3: Check Status
 
 ```
-Use semanthicc tool to index this project
+Use semanthicc tool with action "status"
+```
+
+**Expected Output**:
+```json
+{
+  "indexed": true,
+  "projectId": 1,
+  "projectPath": "C:/ocPlugins/repos/opencode-semanthicc",
+  "chunkCount": 35,
+  "fileCount": 17,
+  "staleCount": 0,
+  "lastIndexedAt": 1735848000000
+}
+```
+
+---
+
+## TEST 7: Search Action (Semantic Search)
+
+### Step 7.1: Basic Search
+
+```
+Use semanthicc tool with action "search" and query "confidence calculation time decay"
+```
+
+**Expected Output**:
+```
+**1. src/heuristics/confidence.ts** (lines 15-45, 78.5% match)
+```export function getEffectiveConfidence(
+  confidence: number,
+  isGolden: boolean,
+  ...
+```
+```
+
+### Step 7.2: Search for Non-Existent Concept
+
+```
+Use semanthicc tool with action "search" and query "kubernetes deployment configuration"
+```
+
+**Expected**: Low similarity results or "No results found"
+
+### Step 7.3: Search with Limit
+
+```
+Use semanthicc tool with action "search", query "function", and limit 3
+```
+
+**Expected**: Exactly 3 results (or fewer if not enough matches)
+
+---
+
+## TEST 8: Forget Action
+
+### Step 8.1: Delete a Memory
+
+```
+Use semanthicc tool with action "forget" and id 1
+```
+
+**Expected**:
+```json
+{
+  "success": true
+}
+```
+
+### Step 8.2: Verify Deletion
+
+```
+Use semanthicc tool with action "list"
+```
+
+**Expected**: Memory with id 1 no longer appears
+
+### Step 8.3: Try to Delete Non-Existent
+
+```
+Use semanthicc tool with action "forget" and id 999
+```
+
+**Expected**:
+```json
+{
+  "success": false
+}
+```
+
+---
+
+## TEST 9: Edge Cases
+
+### 9.1: Empty Project (No Files)
+
+Create empty folder, cd into it:
+```
+Use semanthicc tool with action "index"
 ```
 
 **Expected**:
 ```json
 {
   "success": true,
-  "filesIndexed": 15,
-  "chunksCreated": 25,
-  "durationMs": 5000
+  "filesIndexed": 0,
+  "chunksCreated": 0,
+  "durationMs": 50
 }
 ```
 
-(Numbers will vary based on project size)
+### 9.2: Search Before Index
 
-### Step 4.2: Check Index Status
-
+In a new project (not indexed):
 ```
-Use semanthicc tool to check status
+Use semanthicc tool with action "search" and query "anything"
 ```
 
 **Expected**:
 ```json
 {
-  "indexed": true,
-  "chunkCount": 25,
-  "fileCount": 15,
-  "staleCount": 0
+  "error": "Project not indexed. Run 'index' first."
 }
 ```
 
-### Step 4.3: Semantic Search
+### 9.3: Search Without Query
 
 ```
-Use semanthicc to search for "confidence calculation decay"
+Use semanthicc tool with action "search"
 ```
 
-**Expected**: Returns relevant code chunks from `src/heuristics/confidence.ts` with similarity scores.
+**Expected**:
+```json
+{
+  "error": "Query is required for search"
+}
+```
 
-### Step 4.4: Verify Semantic Understanding
+### 9.4: Remember Without Content
 
 ```
-Use semanthicc to search for "authentication token verification"
+Use semanthicc tool with action "remember"
 ```
 
-**Expected**: 
-- If project has auth code → returns relevant chunks
-- If no auth code → returns "No results found" or low-similarity results
+**Expected**:
+```json
+{
+  "error": "Content is required for remember"
+}
+```
+
+### 9.5: Very Long Content
+
+```
+Use semanthicc tool to remember: "[paste 10000 characters]" 
+```
+
+**Expected**: Works (content is stored, may be chunked in display)
+
+### 9.6: Special Characters
+
+```
+Use semanthicc tool to remember: "Use \"quotes\" and 'apostrophes' and <tags>"
+```
+
+**Expected**: Content stored correctly with escaping
 
 ---
 
-## Phase 5: Database Verification
+## TEST 10: Confidence Evolution
 
-### Step 5.1: Locate Database
+### 10.1: Add Test Pattern
 
-| Platform | Path |
-|----------|------|
-| Windows | `%LOCALAPPDATA%\semanthicc\semanthicc.db` |
-| Linux/macOS | `~/.local/share/semanthicc/semanthicc.db` |
-
-### Step 5.2: Inspect with SQLite
-
-```bash
-# Windows
-sqlite3 "%LOCALAPPDATA%\semanthicc\semanthicc.db"
-
-# Linux/macOS  
-sqlite3 ~/.local/share/semanthicc/semanthicc.db
+```
+Use semanthicc tool to remember: "Test pattern for confidence" with type "pattern"
 ```
 
-Run queries:
-```sql
--- Check projects
-SELECT id, path, name, chunk_count FROM projects;
+### 10.2: Check Initial Confidence
 
--- Check memories (heuristics)
-SELECT id, concept_type, content, confidence FROM memories;
-
--- Check embeddings count
-SELECT project_id, COUNT(*) as chunks FROM embeddings GROUP BY project_id;
 ```
+Use semanthicc tool with action "list"
+```
+
+**Expected**: confidence = "0.50"
+
+### 10.3: Validate Pattern (Not Yet Implemented in Tool)
+
+Currently validation is only via code:
+```typescript
+import { validateMemory } from "opencode-semanthicc";
+validateMemory(memoryId); // +0.05
+```
+
+**Future**: Add `validate` action to tool
+
+### 10.4: Time Decay
+
+After 30 days without validation, confidence halves.
+Golden rules (`is_golden = 1`) never decay.
+
+---
+
+## Database Inspection Commands
+
+### Windows PowerShell
+
+```powershell
+# Open SQLite shell
+sqlite3 "$env:LOCALAPPDATA\semanthicc\semanthicc.db"
+
+# Quick queries
+.tables                                    # List tables
+SELECT * FROM projects;                    # All projects
+SELECT * FROM memories;                    # All heuristics
+SELECT COUNT(*) FROM embeddings;           # Embedding count
+SELECT file_path, COUNT(*) FROM embeddings GROUP BY file_path;  # Files indexed
+```
+
+### One-liners
+
+```powershell
+# Count memories
+sqlite3 "$env:LOCALAPPDATA\semanthicc\semanthicc.db" "SELECT COUNT(*) FROM memories"
+
+# Count embeddings by project
+sqlite3 "$env:LOCALAPPDATA\semanthicc\semanthicc.db" "SELECT p.path, COUNT(e.id) FROM projects p LEFT JOIN embeddings e ON p.id = e.project_id GROUP BY p.id"
+
+# Show all heuristics with confidence
+sqlite3 "$env:LOCALAPPDATA\semanthicc\semanthicc.db" "SELECT id, concept_type, substr(content,1,50), confidence, CASE WHEN project_id IS NULL THEN 'GLOBAL' ELSE 'PROJECT' END FROM memories"
+```
+
+---
+
+## Full Verification Checklist
+
+| # | Test | Command | Expected | ✓ |
+|---|------|---------|----------|---|
+| 1 | Plugin loads | Restart OpenCode | No errors | ⬜ |
+| 2 | Tool exists | "What tools?" | semanthicc listed | ⬜ |
+| 3 | DB created | `status` action | Response (even if empty) | ⬜ |
+| 4 | Remember works | `remember` action | `success: true, id: N` | ⬜ |
+| 5 | List works | `list` action | Shows memories | ⬜ |
+| 6 | Global works | `remember` with `global:true` | `isGlobal: true` in list | ⬜ |
+| 7 | Injection works | New session + ask about patterns | AI knows patterns | ⬜ |
+| 8 | Index works | `index` action | `filesIndexed > 0` | ⬜ |
+| 9 | Status works | `status` action | Shows chunk counts | ⬜ |
+| 10 | Search works | `search` action | Returns relevant code | ⬜ |
+| 11 | Forget works | `forget` action | Memory removed | ⬜ |
+| 12 | Error handling | Search without query | Returns error message | ⬜ |
 
 ---
 
 ## Troubleshooting
 
-### Plugin Not Loading
+### "Tool not found"
+1. Check `opencode.jsonc` has `"opencode-semanthicc"` in plugins array
+2. Check `package.json` has the dependency
+3. Run `bun link opencode-semanthicc` in `~/.config/opencode`
+4. Restart OpenCode
 
-1. Check OpenCode logs for errors
-2. Verify path in `opencode.json` uses correct slashes
-3. Try absolute path instead of relative
-4. Rebuild: `bun run build`
+### "Database not created"
+1. Check write permissions to `%LOCALAPPDATA%`
+2. Run any tool action to trigger creation
+3. Check for errors in OpenCode output
 
-### Heuristics Not Injecting
+### "Heuristics not injecting"
+1. Verify memories exist: `list` action
+2. Start **completely new** session (not just new message)
+3. Memories must have `status = 'current'` (default)
+4. Confidence must be > 0.1 after time decay
 
-1. Verify database exists at expected location
-2. Check if memories exist: `SELECT * FROM memories`
-3. Ensure you're in a project directory that was registered
-
-### Search Returns No Results
-
+### "Search returns nothing"
 1. Run `index` action first
-2. Check embeddings exist: `SELECT COUNT(*) FROM embeddings`
-3. Verify project_id matches current directory
+2. Check `status` shows `chunkCount > 0`
+3. Try broader query
+4. Check you're in the same project directory
 
-### Model Loading Slow
-
-First run downloads MiniLM model (~23MB). Subsequent runs use cache at:
-- Windows: `%USERPROFILE%\.cache\huggingface`
-- Linux/macOS: `~/.cache/huggingface`
-
----
-
-## Verification Checklist
-
-| # | Test | Status |
-|---|------|--------|
-| 1 | Build completes without errors | ⬜ |
-| 2 | All 55 tests pass | ⬜ |
-| 3 | Plugin loads in OpenCode | ⬜ |
-| 4 | `remember` action works | ⬜ |
-| 5 | `list` action shows memories | ⬜ |
-| 6 | Heuristics inject in new session | ⬜ |
-| 7 | `index` action indexes project | ⬜ |
-| 8 | `status` shows correct counts | ⬜ |
-| 9 | `search` returns relevant results | ⬜ |
-| 10 | Database file exists and has data | ⬜ |
-
----
-
-## Success Criteria
-
-**MVP-1 Verified** when:
-- Heuristics can be added via tool
-- Heuristics auto-inject in system prompt
-- Confidence visible with each memory
-
-**MVP-2 Verified** when:
-- Project can be indexed
-- Semantic search returns relevant code
-- Results include file paths and line numbers
+### "Model loading slow"
+First `index` or `search` downloads MiniLM (~23MB).
+Cached at: `%USERPROFILE%\.cache\huggingface\`
