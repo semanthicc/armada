@@ -1,0 +1,38 @@
+{
+  "name": "opencode-semanthicc",
+  "version": "0.1.0",
+  "description": "Semantic memory and heuristics for OpenCode - least tokens, most mistake prevention",
+  "module": "src/index.ts",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "bun build src/index.ts --outdir dist --target bun",
+    "test": "bun test src/",
+    "dev": "bun run src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.0.0"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "keywords": [
+    "opencode",
+    "plugin",
+    "memory",
+    "heuristics",
+    "semantic-search",
+    "ai-coding"
+  ],
+  "author": "",
+  "license": "MIT"
+}

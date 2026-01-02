@@ -1,0 +1,3 @@
+[test]
+include = ["src/**/*.test.ts"]
+exclude = ["references/**/*"]
