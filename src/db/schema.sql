@@ -48,3 +48,23 @@ CREATE INDEX IF NOT EXISTS idx_memories_project ON memories(project_id);
 CREATE INDEX IF NOT EXISTS idx_memories_confidence ON memories(confidence DESC);
 CREATE INDEX IF NOT EXISTS idx_memories_concept_type ON memories(concept_type);
 CREATE INDEX IF NOT EXISTS idx_memories_project_type_conf ON memories(project_id, concept_type, confidence DESC);
+
+CREATE TABLE IF NOT EXISTS embeddings (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  file_path TEXT NOT NULL,
+  file_hash TEXT NOT NULL,
+  chunk_index INTEGER NOT NULL,
+  chunk_start INTEGER NOT NULL,
+  chunk_end INTEGER NOT NULL,
+  content TEXT NOT NULL,
+  embedding BLOB NOT NULL,
+  is_stale INTEGER DEFAULT 0 CHECK(is_stale IN (0, 1)),
+  indexed_at INTEGER DEFAULT (unixepoch('now') * 1000),
+  
+  UNIQUE(project_id, file_path, chunk_index)
+);
+
+CREATE INDEX IF NOT EXISTS idx_embeddings_project ON embeddings(project_id);
+CREATE INDEX IF NOT EXISTS idx_embeddings_file ON embeddings(project_id, file_path);
+CREATE INDEX IF NOT EXISTS idx_embeddings_stale ON embeddings(project_id, is_stale);

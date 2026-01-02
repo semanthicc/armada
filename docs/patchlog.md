@@ -7,6 +7,23 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ---
 
+## [0.2.0] - 2026-01-02
+
+### Added
+- **Semantic code search**: Find code by meaning using MiniLM-L6-v2 embeddings (384 dims)
+- **Project indexing**: Walk project files, chunk code, generate embeddings
+- **Tool actions**: `search`, `index`, `status`, `remember`, `forget`, `list`
+- **File exclusions**: Smart filtering of node_modules, .git, binaries, lock files
+- **Similarity ranking**: Cosine similarity with top-K result selection
+
+### Technical
+- `@xenova/transformers` for ONNX-based MiniLM inference
+- Embeddings stored as BLOB in SQLite with project isolation
+- 55 passing tests, 1.42MB bundle (includes ONNX runtime)
+- New spec: `specs/semantic-search.md`
+
+---
+
 ## [0.1.0] - 2026-01-02
 
 ### Added
@@ -29,7 +46,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 | Version | Milestone | Status |
 |---------|-----------|--------|
 | 0.1.0 | MVP-1: Heuristics | ✅ Complete |
-| 0.2.0 | MVP-2: Semantic code search (MiniLM embeddings) | 🔲 Planned |
+| 0.2.0 | MVP-2: Semantic code search (MiniLM embeddings) | ✅ Complete |
 | 0.3.0 | MVP-3: Knowledge evolution (supersede/archive) | 🔲 Planned |
 | 0.4.0 | MVP-4: Passive learning (tool outcome capture) | 🔲 Planned |
 | 1.0.0 | Full release: All MVPs integrated | 🔲 Planned |
