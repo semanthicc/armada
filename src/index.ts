@@ -1,6 +1,6 @@
 import type { Plugin, PluginInput } from "@opencode-ai/plugin";
 import { tool } from "@opencode-ai/plugin";
-import { getCurrentProject } from "./hooks/project-detect";
+import { getOrCreateProject } from "./hooks/auto-register";
 import { getHeuristicsContext } from "./hooks/heuristics-injector";
 import { addMemory, deleteMemory, listMemories } from "./heuristics";
 import { indexProject, getIndexStats } from "./indexer";
@@ -19,7 +19,7 @@ export const SemanthiccPlugin: Plugin = async (ctx: PluginInput) => {
         const input = params.input as Record<string, unknown> | undefined;
         if (!input) return;
 
-        const project = getCurrentProject(directory);
+        const project = getOrCreateProject(directory);
         const heuristicsContext = getHeuristicsContext(project?.id ?? null);
 
         if (heuristicsContext) {
@@ -36,7 +36,7 @@ export const SemanthiccPlugin: Plugin = async (ctx: PluginInput) => {
       output: { system: string[] }
     ) => {
       try {
-        const project = getCurrentProject(directory);
+        const project = getOrCreateProject(directory);
         const heuristicsContext = getHeuristicsContext(project?.id ?? null);
 
         if (heuristicsContext && !output.system.some(s => s.includes("<project-heuristics>"))) {
@@ -81,7 +81,7 @@ export const SemanthiccPlugin: Plugin = async (ctx: PluginInput) => {
         },
         async execute(args) {
           const { action, query, type, domain, global: isGlobal, id, limit = 5 } = args;
-          const project = getCurrentProject(directory);
+          const project = getOrCreateProject(directory);
 
           switch (action) {
             case "search": {
@@ -89,7 +89,7 @@ export const SemanthiccPlugin: Plugin = async (ctx: PluginInput) => {
                 return "Error: Query is required for search";
               }
               if (!project) {
-                return "Error: No project found. Run 'index' action first.";
+                return "Error: Not in a git repository. Run 'index' action from within a git project.";
               }
               const stats = getIndexStats(project.id);
               if (stats.chunkCount === 0) {
@@ -108,7 +108,7 @@ export const SemanthiccPlugin: Plugin = async (ctx: PluginInput) => {
 
             case "status": {
               if (!project) {
-                return "Project not registered. Run 'index' to register and index.";
+                return "Not in a git repository. Git project required for status.";
               }
               const stats = getIndexStats(project.id);
               return `Project: ${project.path}\nIndexed: ${stats.chunkCount > 0 ? "Yes" : "No"}\nChunks: ${stats.chunkCount}\nFiles: ${stats.fileCount}\nStale: ${stats.staleCount}`;
