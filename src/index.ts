@@ -2,7 +2,8 @@ import type { Plugin, PluginInput } from "@opencode-ai/plugin";
 import { tool } from "@opencode-ai/plugin";
 import { getOrCreateProject } from "./hooks/auto-register";
 import { getHeuristicsContext } from "./hooks/heuristics-injector";
-import { addMemory, deleteMemory, listMemories } from "./heuristics";
+import { addMemory, deleteMemory, listMemories, supersedeMemory } from "./heuristics";
+import { detectHistoryIntent } from "./heuristics/intent";
 import { indexProject, getIndexStats } from "./indexer";
 import { searchCode, formatSearchResultsForTool } from "./search";
 
@@ -49,10 +50,10 @@ export const SemanthiccPlugin: Plugin = async (ctx: PluginInput) => {
 
     tool: {
       semanthicc: tool({
-        description: "Semantic code search and memory management. Actions: search (find code by meaning), index (index project for search), status (check index), remember (add pattern/heuristic), forget (remove memory), list (show memories)",
+        description: "Semantic code search and memory management. Actions: search (find code by meaning), index (index project for search), status (check index), remember (add pattern/heuristic), forget (remove memory), list (show memories), supersede (replace old memory with evolved version)",
         args: {
           action: tool.schema
-            .enum(["search", "index", "status", "remember", "forget", "list"])
+            .enum(["search", "index", "status", "remember", "forget", "list", "supersede"])
             .describe("Action to perform"),
           query: tool.schema
             .string()
@@ -78,9 +79,13 @@ export const SemanthiccPlugin: Plugin = async (ctx: PluginInput) => {
             .number()
             .describe("Max results (default 5)")
             .optional(),
+          includeHistory: tool.schema
+            .boolean()
+            .describe("Include superseded memories in list results")
+            .optional(),
         },
         async execute(args) {
-          const { action, query, type, domain, global: isGlobal, id, limit = 5 } = args;
+          const { action, query, type, domain, global: isGlobal, id, limit = 5, includeHistory } = args;
           const project = getOrCreateProject(directory);
 
           switch (action) {
@@ -136,21 +141,39 @@ export const SemanthiccPlugin: Plugin = async (ctx: PluginInput) => {
             }
 
             case "list": {
+              const shouldIncludeHistory = includeHistory || (query ? detectHistoryIntent(query) : false);
               const memories = listMemories({
                 projectId: project?.id ?? null,
                 domain,
                 limit,
+                includeHistory: shouldIncludeHistory,
               });
               if (memories.length === 0) {
-                return "No memories found.";
+                return shouldIncludeHistory ? "No memories found (including history)." : "No memories found.";
               }
-              return memories
+              const header = shouldIncludeHistory ? "[Including history]\n" : "";
+              return header + memories
                 .map((m) => {
                   const scope = m.project_id === null ? "[global]" : "";
                   const golden = m.is_golden ? "⭐" : "";
-                  return `${golden}${scope} [${m.effectiveConfidence.toFixed(2)}] ${m.concept_type}: ${m.content}`;
+                  const status = m.status !== "current" ? `[${m.status}]` : "";
+                  return `${golden}${scope}${status} [${m.effectiveConfidence.toFixed(2)}] ${m.concept_type}: ${m.content}`;
                 })
                 .join("\n");
+            }
+
+            case "supersede": {
+              if (!id) {
+                return "Error: Memory ID (id) is required for supersede";
+              }
+              if (!query) {
+                return "Error: New content (query) is required for supersede";
+              }
+              const result = supersedeMemory(id, query);
+              if (!result) {
+                return `Error: Memory ${id} not found or already superseded`;
+              }
+              return `Superseded memory ${id} with new memory ${result.new.id}.\nOld: ${result.old.content}\nNew: ${result.new.content}`;
             }
 
             default:

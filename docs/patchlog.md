@@ -7,6 +7,44 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ---
 
+## [0.3.0] - 2026-01-03
+
+### Added
+- **Knowledge Evolution**: Memories can now evolve over time with full history tracking
+- `supersede` action: Replace outdated memories with evolved versions while preserving history chain
+- `getMemoryChain()`: Traverse full evolution history of any memory
+- **History Intent Detection**: Auto-detects when user wants history (e.g., "why is it like this?")
+- `includeHistory` flag for explicit history queries
+
+### Changed
+- Default queries return only `current` status memories
+- List action shows `[superseded]` status badge for historical memories
+- Schema now supports `supersede` as a memory source
+
+### Technical
+- `supersedeMemory(oldId, newContent)` links old→new with proper status updates
+- `detectHistoryIntent()` uses 12 regex patterns for 100% accuracy on test set
+- 33 new tests (102 total), all passing
+
+---
+
+## [0.2.1] - 2026-01-03
+
+### Added
+- **Auto-detect git root**: Plugin now automatically finds and registers projects from any subdirectory
+- No manual `register` action needed — heuristics work immediately when inside a git repo
+
+### Changed
+- All hooks and tool actions use `getOrCreateProject()` for seamless project detection
+- Clearer error messages: "Not in a git repository" instead of "Project not registered"
+
+### Technical
+- `findGitRoot(cwd)` walks up directories looking for `.git`
+- `getOrCreateProject(cwd)` auto-registers using folder name as project name
+- 12 new tests (69 total), all passing
+
+---
+
 ## [0.2.0] - 2026-01-02
 
 ### Added

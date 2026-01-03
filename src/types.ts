@@ -14,7 +14,8 @@ export type MemoryStatus =
 
 export type MemorySource = 
   | "explicit" 
-  | "passive";
+  | "passive"
+  | "supersede";
 
 export type ProjectType = 
   | "active" 

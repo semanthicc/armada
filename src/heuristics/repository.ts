@@ -46,6 +46,7 @@ export function listMemories(options: {
   domain?: string;
   conceptTypes?: string[];
   includeGlobal?: boolean;
+  includeHistory?: boolean;
   limit?: number;
 }): MemoryWithEffectiveConfidence[] {
   const db = getDb();
@@ -54,15 +55,19 @@ export function listMemories(options: {
     domain,
     conceptTypes = ["pattern", "rule", "constraint"],
     includeGlobal = true,
+    includeHistory = false,
     limit = HEURISTICS.MAX_INJECTION_COUNT,
   } = options;
 
   let sql = `
     SELECT * FROM memories 
     WHERE concept_type IN (${conceptTypes.map(() => "?").join(", ")})
-    AND status = 'current'
   `;
   const params: (string | number | null)[] = [...conceptTypes];
+
+  if (!includeHistory) {
+    sql += " AND status = 'current'";
+  }
 
   if (projectId !== null) {
     if (includeGlobal) {
@@ -163,4 +168,69 @@ export function violateMemory(id: number): Memory | null {
     Date.now(),
     id
   ) as Memory;
+}
+
+export function supersedeMemory(
+  oldId: number,
+  newContent: string,
+  evolutionNote?: string
+): { old: Memory; new: Memory } | null {
+  const db = getDb();
+  const oldMemory = getMemory(oldId);
+
+  if (!oldMemory) return null;
+  if (oldMemory.status !== "current") return null;
+
+  const newMemory = addMemory({
+    concept_type: oldMemory.concept_type,
+    content: newContent,
+    domain: oldMemory.domain ?? undefined,
+    project_id: oldMemory.project_id ?? undefined,
+    source: "supersede",
+  });
+
+  const now = Date.now();
+  const updateStmt = db.prepare(`
+    UPDATE memories SET
+      status = 'superseded',
+      superseded_by = ?,
+      superseded_at = ?,
+      evolution_note = ?,
+      updated_at = ?
+    WHERE id = ?
+  `);
+  updateStmt.run(newMemory.id, now, evolutionNote ?? null, now, oldId);
+
+  const setEvolvedStmt = db.prepare(`
+    UPDATE memories SET evolved_from = ? WHERE id = ?
+  `);
+  setEvolvedStmt.run(oldId, newMemory.id);
+
+  return {
+    old: getMemory(oldId)!,
+    new: getMemory(newMemory.id)!,
+  };
+}
+
+export function getMemoryChain(memoryId: number): Memory[] {
+  const start = getMemory(memoryId);
+  if (!start) return [];
+
+  let root = start;
+  while (root.evolved_from) {
+    const parent = getMemory(root.evolved_from);
+    if (!parent) break;
+    root = parent;
+  }
+
+  const chain: Memory[] = [root];
+  let current = root;
+  while (current.superseded_by) {
+    const next = getMemory(current.superseded_by);
+    if (!next) break;
+    chain.push(next);
+    current = next;
+  }
+
+  return chain;
 }

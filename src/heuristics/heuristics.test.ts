@@ -17,6 +17,8 @@ import {
   listMemories,
   validateMemory,
   violateMemory,
+  supersedeMemory,
+  getMemoryChain,
 } from "./repository";
 
 function getTestDbPath(): string {
@@ -170,5 +172,135 @@ describe("Repository", () => {
 
     const violated = violateMemory(memory.id);
     expect(Boolean(violated?.is_golden)).toBe(false);
+  });
+});
+
+describe("supersedeMemory", () => {
+  beforeEach(() => {
+    testDbPath = getTestDbPath();
+    getDb(testDbPath);
+  });
+
+  afterEach(() => {
+    cleanupTestDb();
+  });
+
+  test("links old → new and updates status", () => {
+    const old = addMemory({
+      concept_type: "pattern",
+      content: "Use var for variables",
+      domain: "typescript",
+    });
+
+    const result = supersedeMemory(old.id, "Use const/let instead of var");
+
+    expect(result).not.toBeNull();
+    expect(result!.old.status).toBe("superseded");
+    expect(result!.old.superseded_by).toBe(result!.new.id);
+    expect(result!.new.evolved_from).toBe(old.id);
+    expect(result!.new.status).toBe("current");
+  });
+
+  test("copies domain and project_id from old memory", () => {
+    const db = getDb();
+    db.exec("INSERT INTO projects (path, name) VALUES ('/test/path', 'test-project')");
+    const projectRow = db.query("SELECT id FROM projects WHERE path = '/test/path'").get() as { id: number };
+
+    const old = addMemory({
+      concept_type: "decision",
+      content: "Use REST API",
+      domain: "architecture",
+      project_id: projectRow.id,
+    });
+
+    const result = supersedeMemory(old.id, "Use GraphQL instead");
+
+    expect(result!.new.domain).toBe("architecture");
+    expect(result!.new.project_id).toBe(projectRow.id);
+    expect(result!.new.concept_type).toBe("decision");
+  });
+
+  test("returns null for non-existent memory", () => {
+    const result = supersedeMemory(99999, "New content");
+    expect(result).toBeNull();
+  });
+
+  test("returns null for already-superseded memory", () => {
+    const old = addMemory({
+      concept_type: "pattern",
+      content: "Original",
+    });
+
+    supersedeMemory(old.id, "First supersede");
+    const secondAttempt = supersedeMemory(old.id, "Second supersede");
+
+    expect(secondAttempt).toBeNull();
+  });
+
+  test("new memory starts with default confidence", () => {
+    const old = addMemory({
+      concept_type: "pattern",
+      content: "Old pattern",
+    });
+
+    const db = getDb();
+    db.exec(`UPDATE memories SET confidence = 0.95 WHERE id = ${old.id}`);
+
+    const result = supersedeMemory(old.id, "New pattern");
+
+    expect(result!.new.confidence).toBe(HEURISTICS.DEFAULT_CONFIDENCE);
+  });
+});
+
+describe("getMemoryChain", () => {
+  beforeEach(() => {
+    testDbPath = getTestDbPath();
+    getDb(testDbPath);
+  });
+
+  afterEach(() => {
+    cleanupTestDb();
+  });
+
+  test("returns single-item array for non-evolved memory", () => {
+    const memory = addMemory({
+      concept_type: "pattern",
+      content: "Standalone pattern",
+    });
+
+    const chain = getMemoryChain(memory.id);
+
+    expect(chain).toHaveLength(1);
+    expect(chain[0].id).toBe(memory.id);
+  });
+
+  test("returns full chain for superseded memory", () => {
+    const v1 = addMemory({ concept_type: "pattern", content: "Version 1" });
+    const r1 = supersedeMemory(v1.id, "Version 2");
+    const r2 = supersedeMemory(r1!.new.id, "Version 3");
+
+    const chain = getMemoryChain(v1.id);
+
+    expect(chain).toHaveLength(3);
+    expect(chain[0].content).toBe("Version 1");
+    expect(chain[1].content).toBe("Version 2");
+    expect(chain[2].content).toBe("Version 3");
+  });
+
+  test("returns chain starting from middle element", () => {
+    const v1 = addMemory({ concept_type: "pattern", content: "V1" });
+    const r1 = supersedeMemory(v1.id, "V2");
+    supersedeMemory(r1!.new.id, "V3");
+
+    const chain = getMemoryChain(r1!.new.id);
+
+    expect(chain).toHaveLength(3);
+    expect(chain[0].content).toBe("V1");
+    expect(chain[2].content).toBe("V3");
+  });
+
+  test("returns empty array for non-existent memory", () => {
+    const chain = getMemoryChain(99999);
+    expect(chain).toHaveLength(0);
   });
 });

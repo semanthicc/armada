@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS memories (
   evolved_from INTEGER REFERENCES memories(id),
   evolution_note TEXT,
   superseded_at INTEGER,
-  source TEXT DEFAULT 'explicit' CHECK(source IN ('explicit', 'passive')),
+  source TEXT DEFAULT 'explicit' CHECK(source IN ('explicit', 'passive', 'supersede')),
   source_session_id TEXT,
   source_tool TEXT,
   created_at INTEGER DEFAULT (unixepoch('now') * 1000),
