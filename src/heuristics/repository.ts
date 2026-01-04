@@ -15,9 +15,32 @@ function getLegacyContext(): SemanthiccContext {
   return { db: getDb() };
 }
 
+export class DuplicateMemoryError extends Error {
+  constructor(public existingId: number) {
+    super(`Duplicate memory exists (id: ${existingId})`);
+    this.name = "DuplicateMemoryError";
+  }
+}
+
 export function addMemory(ctxOrInput: SemanthiccContext | CreateMemoryInput, input?: CreateMemoryInput): Memory {
   const ctx = input ? (ctxOrInput as SemanthiccContext) : getLegacyContext();
   const data = input ?? (ctxOrInput as CreateMemoryInput);
+  
+  const projectId = data.project_id ?? null;
+  
+  const existingStmt = ctx.db.prepare(`
+    SELECT id FROM memories 
+    WHERE content = ? 
+    AND concept_type = ?
+    AND ((project_id IS NULL AND ? IS NULL) OR project_id = ?)
+    AND status = 'current'
+    LIMIT 1
+  `);
+  const existing = existingStmt.get(data.content, data.concept_type, projectId, projectId) as { id: number } | null;
+  
+  if (existing) {
+    throw new DuplicateMemoryError(existing.id);
+  }
   
   const stmt = ctx.db.prepare(`
     INSERT INTO memories (concept_type, content, domain, project_id, source, source_session_id, source_tool, keywords)
@@ -29,7 +52,7 @@ export function addMemory(ctxOrInput: SemanthiccContext | CreateMemoryInput, inp
     data.concept_type,
     data.content,
     data.domain ?? null,
-    data.project_id ?? null,
+    projectId,
     data.source ?? "explicit",
     data.source_session_id ?? null,
     data.source_tool ?? null,

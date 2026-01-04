@@ -20,7 +20,7 @@ describe("Passive Learner", () => {
     
     learner.handleToolOutcome(
       { tool: { name: "read", parameters: {} } },
-      { content: "Error: File not found: src/main.ts", isError: true }
+      { content: "Error: ENOENT file not found: src/components/main.ts", isError: true }
     );
 
     const memories = listMemories(ctx, { conceptTypes: ["learning"], projectId: 3 });
@@ -28,7 +28,7 @@ describe("Passive Learner", () => {
     const m = memories[0];
     if (!m) throw new Error("Memory not found");
     
-    expect(m.content).toContain("File not found");
+    expect(m.content).toContain("file not found");
     expect(m.source).toBe("passive");
     expect(m.source_tool).toBe("read");
     expect(m.source_session_id).toBe("session-123");
@@ -61,7 +61,7 @@ describe("Passive Learner", () => {
   test("truncates long error messages", () => {
     const learner = createPassiveLearner(ctx, 3, "session-123");
     
-    const prefix = "Valid error message with keywords file found "; 
+    const prefix = "TypeError: Cannot read property map of undefined in component "; 
     const longContent = prefix + "a".repeat(PASSIVE_CONFIG.MAX_CONTENT_LENGTH + 100);
     
     learner.handleToolOutcome(
@@ -95,7 +95,7 @@ describe("Passive Learner", () => {
     
     learner.handleToolOutcome(
       { tool: { name: "read", parameters: {} } },
-      { content: "Error: File missing from src", isError: true }
+      { content: "Error: ENOENT file missing from src/components/Button.tsx", isError: true }
     );
 
     let memories = listMemories(ctx, { conceptTypes: ["learning"], projectId: 3 });

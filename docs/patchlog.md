@@ -7,6 +7,51 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ---
 
+## [0.5.0] - 2026-01-04
+
+### Added
+- **Exact-Match Deduplication**: Prevents adding duplicate memories with same content, concept_type, and project scope
+- **`DuplicateMemoryError`**: Custom error class with `existingId` for handling duplicates
+- **Smarter Passive Filtering**: Transient network errors and false positives now filtered out
+- **`semanthicc status` Command**: Shows project index stats, memory counts, type breakdown, and confidence distribution
+
+### Changed
+- `MIN_KEYWORDS` increased from 3 to 4 for passive learning (reduces noise)
+- `MIN_CONTENT_LENGTH` of 30 chars required for passive capture
+- Passive learner now catches `DuplicateMemoryError` silently (no duplicate failures stored)
+
+### Technical
+- New patterns: `TRANSIENT_PATTERNS` (ECONNRESET, ETIMEDOUT, etc.)
+- New patterns: `FALSE_POSITIVE_PATTERNS` ("error handling", "fixed the error", etc.)
+- New file: `src/status.ts` with `getStatus()` and `formatStatus()`
+- New tests: 41 new tests (209 total), all passing
+- ADR-013: Exact-match deduplication (no fuzzy - false positive risk)
+- ADR-014: Passive learning noise filtering
+- ADR-015: Status command for visibility
+
+---
+
+## [0.4.1] - 2026-01-04
+
+### Added
+- **SSOT Architecture**: `src/constants.ts` with `INJECTABLE_CONCEPT_TYPES`
+- **Retrieval Quality Tests**: 22 real-world scenario tests
+- **Adversarial Tests**: 6 homonym/false-positive attack tests
+
+### Changed
+- `decision` and `context` concept types now included in injection
+- Jaccard similarity threshold lowered from 0.3 to 0.2 for better recall
+- `similarity.ts` now filters `status='current'` (archived failures excluded)
+
+### Fixed
+- Missing stopwords in keywords.ts ("that", "this", "these", etc.)
+
+### Technical
+- 168 tests passing
+- All concept types now managed via SSOT constant
+
+---
+
 ## [0.4.0] - 2026-01-04
 
 ### Added

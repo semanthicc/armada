@@ -8,6 +8,7 @@ import { addMemory, deleteMemory, listMemories, supersedeMemory, archiveMemory }
 import { detectHistoryIntent } from "./heuristics/intent";
 import { indexProject, getIndexStats } from "./indexer";
 import { searchCode, formatSearchResultsForTool } from "./search";
+import { getStatus, formatStatus } from "./status";
 
 export type * from "./types";
 
@@ -153,11 +154,8 @@ export const SemanthiccPlugin: Plugin = async (ctx: PluginInput) => {
             }
 
             case "status": {
-              if (!project) {
-                return "Not in a git repository. Git project required for status.";
-              }
-              const stats = getIndexStats(project.id);
-              return `Project: ${project.path}\nIndexed: ${stats.chunkCount > 0 ? "Yes" : "No"}\nChunks: ${stats.chunkCount}\nFiles: ${stats.fileCount}\nStale: ${stats.staleCount}`;
+              const status = getStatus(project?.id ?? null);
+              return formatStatus(status);
             }
 
             case "remember": {
