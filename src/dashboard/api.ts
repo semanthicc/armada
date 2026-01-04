@@ -1,8 +1,11 @@
 import { getStatus } from "../status";
-import { listMemories, deleteMemory } from "../heuristics/repository";
+import { listMemories, deleteMemory, updateMemory, findDuplicates, purgeDuplicates, restoreMemory } from "../heuristics/repository";
 import { searchCode } from "../search/search";
 import { getDb } from "../db";
 import type { SemanthiccContext } from "../context";
+import { log } from "../logger";
+import { indexProject } from "../indexer";
+import { deleteAllEmbeddings } from "../lance/embeddings";
 
 function getContext(): SemanthiccContext {
   return { db: getDb() };
@@ -16,6 +19,8 @@ export async function handleRequest(
   const url = new URL(req.url);
   const path = url.pathname.replace("/api", "");
   const ctx = context || getContext();
+  
+  log.api.info(`${req.method} ${path} (projectId: ${projectId})`);
 
   try {
     if (path === "/status") {
@@ -36,11 +41,52 @@ export async function handleRequest(
     if (req.method === "DELETE" && path.startsWith("/memories/")) {
       const idStr = path.split("/")[2];
       const id = parseInt(idStr || "");
+      log.api.debug(`DELETE memory: idStr="${idStr}", parsed id=${id}`);
       if (isNaN(id)) {
+        log.api.warn(`Invalid ID, returning 400`);
         return Response.json({ error: "Invalid ID" }, { status: 400 });
       }
       const deleted = deleteMemory(ctx, id);
-      return Response.json({ success: deleted });
+      log.api.info(`deleteMemory result: ${deleted}`);
+      return Response.json({ success: deleted, id });
+    }
+
+    if (req.method === "POST" && path.match(/^\/memories\/\d+\/restore$/)) {
+      const idStr = path.split("/")[2];
+      const id = parseInt(idStr || "");
+      log.api.debug(`RESTORE memory: id=${id}`);
+      if (isNaN(id)) {
+        return Response.json({ error: "Invalid ID" }, { status: 400 });
+      }
+      const restored = restoreMemory(ctx, id);
+      log.api.info(`restoreMemory result: ${restored}`);
+      return Response.json({ success: restored });
+    }
+
+    if (req.method === "PUT" && path.startsWith("/memories/")) {
+      const idStr = path.split("/")[2];
+      const id = parseInt(idStr || "");
+      log.api.debug(`PUT memory: idStr="${idStr}", parsed id=${id}`);
+      if (isNaN(id)) {
+        return Response.json({ error: "Invalid ID" }, { status: 400 });
+      }
+      const body = await req.json() as { content?: string; concept_type?: string; domain?: string | null; confidence?: number };
+      log.api.debug(`PUT body:`, body);
+      const updated = updateMemory(ctx, id, body);
+      log.api.info(`updateMemory result: ${updated}`);
+      return Response.json({ success: updated });
+    }
+
+    if (path === "/duplicates" && req.method === "GET") {
+      const duplicates = findDuplicates(ctx, projectId);
+      log.api.info(`Found ${duplicates.length} duplicate groups`);
+      return Response.json(duplicates);
+    }
+
+    if (path === "/duplicates" && req.method === "DELETE") {
+      const deleted = purgeDuplicates(ctx, projectId);
+      log.api.info(`Purged ${deleted} duplicates`);
+      return Response.json({ deleted });
     }
 
     if (path === "/search") {
@@ -55,8 +101,64 @@ export async function handleRequest(
       return Response.json(results);
     }
 
+    if (path === "/index" && req.method === "POST") {
+      if (!projectId) {
+        return Response.json({ error: "Project context required" }, { status: 400 });
+      }
+      const project = ctx.db.prepare("SELECT path, name FROM projects WHERE id = ?").get(projectId) as { path: string; name: string } | null;
+      if (!project) {
+        return Response.json({ error: "Project not found" }, { status: 404 });
+      }
+
+      const stream = new ReadableStream({
+        async start(controller) {
+          const encoder = new TextEncoder();
+          const send = (data: any) => {
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+          };
+
+          try {
+            log.api.info(`Starting index for project ${projectId}: ${project.path}`);
+            const result = await indexProject(ctx, project.path, { 
+              projectName: project.name,
+              onProgress: (p) => send({ type: "progress", ...p })
+            });
+            log.api.info(`Index complete: ${result.filesIndexed} files, ${result.chunksCreated} chunks`);
+            send({ type: "complete", result });
+          } catch (e) {
+            log.api.error(`Index failed:`, e);
+            send({ type: "error", error: e instanceof Error ? e.message : String(e) });
+          } finally {
+            controller.close();
+          }
+        }
+      });
+
+      return new Response(stream, {
+        headers: {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+          "Connection": "keep-alive",
+        },
+      });
+    }
+
+    if (path === "/index" && req.method === "DELETE") {
+      if (!projectId) {
+        return Response.json({ error: "Project context required" }, { status: 400 });
+      }
+      log.api.info(`Deleting index for project ${projectId}`);
+      await deleteAllEmbeddings(projectId);
+      ctx.db.prepare("DELETE FROM file_hashes WHERE project_id = ?").run(projectId);
+      ctx.db.prepare("UPDATE projects SET last_indexed_at = NULL WHERE id = ?").run(projectId);
+      log.api.info(`Index deleted for project ${projectId}`);
+      return Response.json({ success: true });
+    }
+
+    log.api.warn(`No route matched for: ${req.method} ${path}`);
     return new Response("Not Found", { status: 404 });
   } catch (e) {
+    log.api.error(`Error:`, e);
     return Response.json({ error: e instanceof Error ? e.message : String(e) }, { status: 500 });
   }
 }

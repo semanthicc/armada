@@ -16,6 +16,7 @@ import {
   violateMemory,
   supersedeMemory,
   getMemoryChain,
+  restoreMemory,
 } from "./repository";
 
 describe("Confidence", () => {
@@ -288,5 +289,105 @@ describe("getMemoryChain", () => {
   test("returns empty array for non-existent memory", () => {
     const chain = getMemoryChain(ctx, 99999);
     expect(chain).toHaveLength(0);
+  });
+});
+
+describe("deleteMemory with FK references", () => {
+  let ctx: TestContext;
+
+  beforeEach(() => {
+    ctx = createTestContext();
+  });
+
+  afterEach(() => {
+    ctx.cleanup();
+  });
+
+  test("deletes memory that has been superseded (is referenced by superseded_by)", () => {
+    const old = addMemory(ctx, { concept_type: "pattern", content: "Old pattern" });
+    const result = supersedeMemory(ctx, old.id, "New pattern");
+    expect(result).not.toBeNull();
+
+    const deleted = deleteMemory(ctx, old.id);
+    expect(deleted).toBe(true);
+    expect(getMemory(ctx, old.id)).toBeNull();
+  });
+
+  test("deletes memory that superseded another (has evolved_from reference)", () => {
+    const old = addMemory(ctx, { concept_type: "pattern", content: "Old pattern" });
+    const result = supersedeMemory(ctx, old.id, "New pattern");
+    expect(result).not.toBeNull();
+
+    const deleted = deleteMemory(ctx, result!.new.id);
+    expect(deleted).toBe(true);
+    expect(getMemory(ctx, result!.new.id)).toBeNull();
+  });
+
+  test("deletes middle memory in a chain", () => {
+    const v1 = addMemory(ctx, { concept_type: "pattern", content: "V1" });
+    const r1 = supersedeMemory(ctx, v1.id, "V2");
+    expect(r1).not.toBeNull();
+    const r2 = supersedeMemory(ctx, r1!.new.id, "V3");
+    expect(r2).not.toBeNull();
+
+    const deleted = deleteMemory(ctx, r1!.new.id);
+    expect(deleted).toBe(true);
+    expect(getMemory(ctx, r1!.new.id)).toBeNull();
+  });
+});
+
+describe("soft delete and restore", () => {
+  let ctx: TestContext;
+
+  beforeEach(() => {
+    ctx = createTestContext();
+  });
+
+  afterEach(() => {
+    ctx.cleanup();
+  });
+
+  test("deleteMemory soft deletes by setting status to archived", () => {
+    const m = addMemory(ctx, { concept_type: "pattern", content: "Test" });
+    const deleted = deleteMemory(ctx, m.id);
+    expect(deleted).toBe(true);
+    
+    const row = ctx.db.prepare("SELECT status FROM memories WHERE id = ?").get(m.id) as { status: string } | null;
+    expect(row).not.toBeNull();
+    expect(row!.status).toBe("archived");
+  });
+
+  test("getMemory returns null for archived memories", () => {
+    const m = addMemory(ctx, { concept_type: "pattern", content: "Test" });
+    deleteMemory(ctx, m.id);
+    expect(getMemory(ctx, m.id)).toBeNull();
+  });
+
+  test("listMemories excludes archived memories", () => {
+    addMemory(ctx, { concept_type: "pattern", content: "Keep me" });
+    const toDelete = addMemory(ctx, { concept_type: "pattern", content: "Delete me" });
+    deleteMemory(ctx, toDelete.id);
+    
+    const list = listMemories(ctx, { conceptTypes: ["pattern"] });
+    expect(list).toHaveLength(1);
+    expect(list[0]!.content).toBe("Keep me");
+  });
+
+  test("restoreMemory brings back archived memory", () => {
+    const m = addMemory(ctx, { concept_type: "pattern", content: "Restore me" });
+    deleteMemory(ctx, m.id);
+    expect(getMemory(ctx, m.id)).toBeNull();
+    
+    const restored = restoreMemory(ctx, m.id);
+    expect(restored).toBe(true);
+    
+    const mem = getMemory(ctx, m.id);
+    expect(mem).not.toBeNull();
+    expect(mem!.status).toBe("current");
+  });
+
+  test("restoreMemory returns false for non-existent id", () => {
+    const restored = restoreMemory(ctx, 99999);
+    expect(restored).toBe(false);
   });
 });

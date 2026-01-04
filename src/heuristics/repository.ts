@@ -2,6 +2,7 @@ import { getDb } from "../db";
 import type { SemanthiccContext } from "../context";
 import type { Memory, CreateMemoryInput, MemoryWithEffectiveConfidence } from "../types";
 import { INJECTABLE_CONCEPT_TYPES } from "../constants";
+import { log } from "../logger";
 import {
   HEURISTICS,
   getEffectiveConfidence,
@@ -64,7 +65,7 @@ export function getMemory(ctxOrId: SemanthiccContext | number, id?: number): Mem
   const ctx = typeof id === "number" ? (ctxOrId as SemanthiccContext) : getLegacyContext();
   const memoryId = id ?? (ctxOrId as number);
   
-  const stmt = ctx.db.prepare("SELECT * FROM memories WHERE id = ?");
+  const stmt = ctx.db.prepare("SELECT * FROM memories WHERE id = ? AND status != 'archived'");
   return stmt.get(memoryId) as Memory | null;
 }
 
@@ -72,9 +73,93 @@ export function deleteMemory(ctxOrId: SemanthiccContext | number, id?: number): 
   const ctx = typeof id === "number" ? (ctxOrId as SemanthiccContext) : getLegacyContext();
   const memoryId = id ?? (ctxOrId as number);
   
-  const stmt = ctx.db.prepare("DELETE FROM memories WHERE id = ?");
+  ctx.db.prepare("UPDATE memories SET superseded_by = NULL WHERE superseded_by = ?").run(memoryId);
+  ctx.db.prepare("UPDATE memories SET evolved_from = NULL WHERE evolved_from = ?").run(memoryId);
+  
+  const stmt = ctx.db.prepare("UPDATE memories SET status = 'archived', updated_at = CURRENT_TIMESTAMP WHERE id = ?");
   const result = stmt.run(memoryId);
   return result.changes > 0;
+}
+
+
+export function restoreMemory(ctxOrId: SemanthiccContext | number, id?: number): boolean {
+  const ctx = typeof id === "number" ? (ctxOrId as SemanthiccContext) : getLegacyContext();
+  const memoryId = id ?? (ctxOrId as number);
+  
+  const stmt = ctx.db.prepare("UPDATE memories SET status = 'current', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'archived'");
+  const result = stmt.run(memoryId);
+  return result.changes > 0;
+}
+
+
+export function updateMemory(
+  ctx: SemanthiccContext, 
+  id: number, 
+  updates: { content?: string; concept_type?: string; domain?: string | null; confidence?: number }
+): boolean {
+  const sets: string[] = [];
+  const values: (string | number | null)[] = [];
+  
+  if (updates.content !== undefined) {
+    sets.push("content = ?");
+    values.push(updates.content);
+  }
+  if (updates.concept_type !== undefined) {
+    sets.push("concept_type = ?");
+    values.push(updates.concept_type);
+  }
+  if (updates.domain !== undefined) {
+    sets.push("domain = ?");
+    values.push(updates.domain);
+  }
+  if (updates.confidence !== undefined) {
+    sets.push("confidence = ?");
+    values.push(updates.confidence);
+  }
+  
+  if (sets.length === 0) return false;
+  
+  values.push(id);
+  const stmt = ctx.db.prepare(`UPDATE memories SET ${sets.join(", ")} WHERE id = ?`);
+  const result = stmt.run(...values);
+  log.db.debug(`updateMemory id=${id}, changes=${result.changes}, updates=`, updates);
+  return result.changes > 0;
+}
+
+export function findDuplicates(ctx: SemanthiccContext, projectId: number | null): Array<{ content: string; ids: number[]; count: number }> {
+  const stmt = ctx.db.prepare(`
+    SELECT content, GROUP_CONCAT(id) as ids, COUNT(*) as count
+    FROM memories
+    WHERE status = 'current'
+    AND ((project_id IS NULL AND ? IS NULL) OR project_id = ? OR project_id IS NULL)
+    GROUP BY content
+    HAVING COUNT(*) > 1
+    ORDER BY count DESC
+  `);
+  const rows = stmt.all(projectId, projectId) as Array<{ content: string; ids: string; count: number }>;
+  return rows.map(r => ({
+    content: r.content,
+    ids: r.ids.split(",").map(Number),
+    count: r.count
+  }));
+}
+
+export function purgeDuplicates(ctx: SemanthiccContext, projectId: number | null): number {
+  const duplicates = findDuplicates(ctx, projectId);
+  let deleted = 0;
+  
+  for (const dup of duplicates) {
+    // Keep the first (oldest) ID, delete the rest
+    const idsToDelete = dup.ids.slice(1);
+    for (const id of idsToDelete) {
+      if (deleteMemory(ctx, id)) {
+        deleted++;
+      }
+    }
+  }
+  
+  log.db.info(`purgeDuplicates deleted ${deleted} duplicate memories`);
+  return deleted;
 }
 
 export interface ListMemoriesOptions {

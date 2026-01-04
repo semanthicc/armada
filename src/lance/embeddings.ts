@@ -85,3 +85,11 @@ export async function getEmbeddingStats(projectId: number): Promise<{ chunkCount
   
   return { chunkCount: count };
 }
+
+export async function deleteAllEmbeddings(projectId: number): Promise<void> {
+  const db = await getLanceDb(projectId);
+  const tableNames = await db.tableNames();
+  if (tableNames.includes(TABLE_NAME)) {
+    await db.dropTable(TABLE_NAME);
+  }
+}

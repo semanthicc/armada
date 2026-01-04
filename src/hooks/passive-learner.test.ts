@@ -19,7 +19,7 @@ describe("Passive Learner", () => {
     const learner = createPassiveLearner(ctx, 3, "session-123");
     
     learner.handleToolOutcome(
-      { tool: { name: "read", parameters: {} } },
+      { tool: { name: "bash", parameters: {} } },
       { content: "Error: ENOENT file not found: src/components/main.ts", isError: true }
     );
 
@@ -30,7 +30,7 @@ describe("Passive Learner", () => {
     
     expect(m.content).toContain("file not found");
     expect(m.source).toBe("passive");
-    expect(m.source_tool).toBe("read");
+    expect(m.source_tool).toBe("bash");
     expect(m.source_session_id).toBe("session-123");
   });
 
@@ -38,7 +38,7 @@ describe("Passive Learner", () => {
     const learner = createPassiveLearner(ctx, 3, "session-123");
     
     learner.handleToolOutcome(
-      { tool: { name: "read", parameters: {} } },
+      { tool: { name: "bash", parameters: {} } },
       { content: "File content here...", isError: false }
     );
 
@@ -50,7 +50,7 @@ describe("Passive Learner", () => {
     const learner = createPassiveLearner(ctx, 3, "session-123");
     
     learner.handleToolOutcome(
-      { tool: { name: "read", parameters: {} } },
+      { tool: { name: "bash", parameters: {} } },
       { content: "Error: No", isError: true } 
     );
 
@@ -65,7 +65,7 @@ describe("Passive Learner", () => {
     const longContent = prefix + "a".repeat(PASSIVE_CONFIG.MAX_CONTENT_LENGTH + 100);
     
     learner.handleToolOutcome(
-      { tool: { name: "read", parameters: {} } },
+      { tool: { name: "bash", parameters: {} } },
       { content: longContent, isError: true }
     );
 
@@ -94,7 +94,7 @@ describe("Passive Learner", () => {
     const learner = createPassiveLearner(ctx, 3, "session-123");
     
     learner.handleToolOutcome(
-      { tool: { name: "read", parameters: {} } },
+      { tool: { name: "bash", parameters: {} } },
       { content: "Error: ENOENT file missing from src/components/Button.tsx", isError: true }
     );
 
@@ -105,12 +105,13 @@ describe("Passive Learner", () => {
     expect(m1.status).toBe("current");
 
     learner.handleToolOutcome(
-      { tool: { name: "read", parameters: {} } },
+      { tool: { name: "bash", parameters: {} } },
       { content: "Success", isError: false }
     );
 
-    const m = getMemory(ctx, m1.id);
-    expect(m).not.toBeNull();
-    expect(m!.status).toBe("archived");
+    // getMemory excludes archived, so query DB directly
+    const row = ctx.db.prepare("SELECT status FROM memories WHERE id = ?").get(m1.id) as { status: string } | null;
+    expect(row).not.toBeNull();
+    expect(row!.status).toBe("archived");
   });
 });

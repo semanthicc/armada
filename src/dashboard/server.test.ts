@@ -5,11 +5,14 @@ import { addMemory } from "../heuristics/repository";
 
 describe("Dashboard Server", () => {
   let ctx: TestContext;
-  const PORT = 14567;
+  let port: number;
+  let basePort = 14567;
 
   beforeEach(() => {
+    stopDashboard();
     ctx = createTestContext();
     ctx.db.exec("INSERT INTO projects (id, path, name) VALUES (1, '/test', 'Test Project')");
+    basePort += 50; // Increment base port for each test to avoid overlap
   });
 
   afterEach(() => {
@@ -18,17 +21,19 @@ describe("Dashboard Server", () => {
   });
 
   test("starts and stops server", () => {
-    const msg = startDashboard(PORT, 1, ctx);
-    expect(msg).toContain(`started at http://localhost:${PORT}`);
+    const result = startDashboard(basePort, 1, ctx);
+    expect(result.port).not.toBeNull();
+    expect(result.message).toContain("started at");
     
     const stopMsg = stopDashboard();
     expect(stopMsg).toBe("Dashboard stopped");
   });
 
   test("serves status API", async () => {
-    startDashboard(PORT, 1, ctx);
+    const result = startDashboard(basePort, 1, ctx);
+    port = result.port!;
     
-    const res = await fetch(`http://localhost:${PORT}/api/status`);
+    const res = await fetch(`http://localhost:${port}/api/status`);
     expect(res.ok).toBe(true);
     
     const data = await res.json() as any;
@@ -38,9 +43,13 @@ describe("Dashboard Server", () => {
 
   test("serves memories API", async () => {
     addMemory(ctx, { concept_type: "pattern", content: "Test Pattern", project_id: 1 });
-    startDashboard(PORT, 1, ctx);
+    const result = startDashboard(basePort, 1, ctx);
+    port = result.port!;
     
-    const res = await fetch(`http://localhost:${PORT}/api/memories`);
+    const res = await fetch(`http://localhost:${port}/api/memories`);
+    if (!res.ok) {
+      console.error(await res.text());
+    }
     expect(res.ok).toBe(true);
     
     const data = await res.json() as any[];
@@ -49,9 +58,10 @@ describe("Dashboard Server", () => {
   });
 
   test("serves static HTML", async () => {
-    startDashboard(PORT, 1, ctx);
+    const result = startDashboard(basePort, 1, ctx);
+    port = result.port!;
     
-    const res = await fetch(`http://localhost:${PORT}/`);
+    const res = await fetch(`http://localhost:${port}/`);
     expect(res.ok).toBe(true);
     expect(res.headers.get("Content-Type")).toContain("text/html");
     
@@ -60,9 +70,10 @@ describe("Dashboard Server", () => {
   });
 
   test("handles 404", async () => {
-    startDashboard(PORT, 1, ctx);
+    const result = startDashboard(basePort, 1, ctx);
+    port = result.port!;
     
-    const res = await fetch(`http://localhost:${PORT}/api/unknown`);
+    const res = await fetch(`http://localhost:${port}/api/unknown`);
     expect(res.status).toBe(404);
   });
 });

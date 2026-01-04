@@ -13,12 +13,24 @@ import { getStatus, formatStatus } from "./status";
 import { startDashboard, stopDashboard } from "./dashboard/server";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join, isAbsolute } from "node:path";
+import { loadConfig } from "./config";
+import { exec } from "node:child_process";
 
 export type * from "./types";
 
 export const SemanthiccPlugin: Plugin = async (ctx: PluginInput) => {
   const { directory } = ctx;
   const project = getOrCreateProject(directory);
+  const config = loadConfig(directory);
+
+  if (config.dashboard === "auto") {
+    const result = startDashboard(config.port || 4567, project?.id ?? null);
+    if (result.port) {
+      const url = `http://localhost:${result.port}`;
+      const startCmd = process.platform === "win32" ? "start" : process.platform === "darwin" ? "open" : "xdg-open";
+      exec(`${startCmd} ${url}`);
+    }
+  }
   
   const sessionLearners = new Map<string, ReturnType<typeof createPassiveLearner>>();
   
@@ -288,7 +300,8 @@ export const SemanthiccPlugin: Plugin = async (ctx: PluginInput) => {
               if (query === "stop") {
                 return stopDashboard();
               }
-              return startDashboard(4567, project?.id ?? null);
+              const result = startDashboard(4567, project?.id ?? null);
+              return result.message;
             }
 
             default:

@@ -7,43 +7,60 @@ import type { SemanthiccContext } from "../context";
 let server: Server<any> | null = null;
 
 export function startDashboard(
-  port: number = 4567, 
+  preferredPort: number = 4567, 
   projectId: number | null = null,
   context?: SemanthiccContext
-): string {
+): { message: string; port: number | null } {
   if (server) {
-    return `Dashboard already running at ${server.url}`;
+    const port = server.port ?? null;
+    return { message: `Dashboard already running at ${server.url}`, port };
   }
 
-  server = serve({
-    port,
-    async fetch(req) {
-      const url = new URL(req.url);
-      
-      if (url.pathname.startsWith("/api")) {
-        return handleRequest(req, projectId, context);
-      }
-      
-      const staticPath = join(import.meta.dir, "static", url.pathname === "/" ? "index.html" : url.pathname.slice(1));
-      
-      if (existsSync(staticPath) && !url.pathname.endsWith("/")) {
-        try {
-          const content = readFileSync(staticPath);
-          const ext = extname(staticPath);
-          const type = getMimeType(ext);
-          return new Response(content, {
-            headers: { "Content-Type": type },
+  const maxPort = preferredPort + 50; // Try up to 50 ports
+  let lastError: Error | null = null;
+
+  for (let port = preferredPort; port <= maxPort; port++) {
+    try {
+      server = serve({
+        port,
+        async fetch(req) {
+          const url = new URL(req.url);
+          
+          if (url.pathname.startsWith("/api")) {
+            return handleRequest(req, projectId, context);
+          }
+          
+          const staticPath = join(import.meta.dir, "static", url.pathname === "/" ? "index.html" : url.pathname.slice(1));
+          
+          if (existsSync(staticPath) && !url.pathname.endsWith("/")) {
+            try {
+              const content = readFileSync(staticPath);
+              const ext = extname(staticPath);
+              const type = getMimeType(ext);
+              return new Response(content, {
+                headers: { "Content-Type": type },
+              });
+            } catch {}
+          }
+
+          return new Response(getHtml(), {
+            headers: { "Content-Type": "text/html" },
           });
-        } catch {}
-      }
-
-      return new Response(getHtml(), {
-        headers: { "Content-Type": "text/html" },
+        },
       });
-    },
-  });
+      
+      return { message: `Dashboard started at ${server.url}`, port };
+    } catch (err) {
+      lastError = err as Error;
+      // Port in use, try next
+      continue;
+    }
+  }
 
-  return `Dashboard started at ${server.url}`;
+  return { 
+    message: `Failed to start dashboard: all ports ${preferredPort}-${maxPort} in use`, 
+    port: null 
+  };
 }
 
 export function stopDashboard(): string {
