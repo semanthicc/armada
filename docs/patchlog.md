@@ -7,6 +7,41 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ---
 
+## [1.3.0] - 2026-01-05
+
+### Added
+- **Hybrid Search**: LanceDB native FTS index + vector search with automatic fallback
+- **Gemini Embeddings**: Optional `@google/genai` integration for higher-quality embeddings
+- **Global Config**: `~/.config/opencode/semanthicc.json` for API keys and global settings
+- **Settings Tab**: Dashboard UI for selecting embedding provider and configuring API keys
+- **Search Type Indicator**: Results now show `hybrid` or `vector-only` search mode
+- **Query Tips**: Tool description includes guidance for writing effective search queries
+
+### Changed
+- **Memories Filter**: `projectId=null` now returns ALL memories (was: global-only)
+- **Config Hierarchy**: Global config merged with project config (global for secrets, project for overrides)
+- **SearchResponse**: Now includes `results`, `searchType`, and `ftsIndexed` fields
+
+### Technical
+- New file: `src/embeddings/gemini.ts` (Gemini embedding provider)
+- New config: `~/.config/opencode/semanthicc.json` (global settings)
+- New dependency: `@google/genai` (optional, for Gemini embeddings)
+- New script: `bun run check` (alias for `tsc --noEmit`)
+- LanceDB FTS index auto-created on first hybrid search
+- Fallback to vector-only if FTS unavailable
+- 273 tests passing (up from 271)
+
+### How It Works
+```
+User query: "function that validates JWT token"
+→ hybridSearch() creates FTS index if needed
+→ Combines nearestToText() + nearestTo() 
+→ Returns: { results: [...], searchType: "hybrid", ftsIndexed: true }
+→ If FTS fails: fallback to vector-only search
+```
+
+---
+
 ## [1.0.0] - 2026-01-04
 
 ### Added
@@ -261,6 +296,7 @@ User: "Fix the Button.svelte component"
 
 | Version | Milestone | Status |
 |---------|-----------|--------|
+| 1.3.0 | Hybrid Search + Gemini Embeddings + Global Config | ✅ Complete |
 | 0.1.0 | MVP-1: Heuristics | ✅ Complete |
 | 0.2.0 | MVP-2: Semantic code search (MiniLM embeddings) | ✅ Complete |
 | 0.3.0 | MVP-3: Knowledge evolution (supersede/archive) | ✅ Complete |
