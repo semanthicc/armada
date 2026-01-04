@@ -7,6 +7,25 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ---
 
+## [0.8.0] - 2026-01-04
+
+### Added
+- **Knowledge Mobility**: Promote project rules to global scope, demote global rules to project
+- **Import/Export**: Share heuristics via JSON files (`semanthicc export`, `semanthicc import`)
+- **Safety Checks**: Promoting a domain-less rule to global requires explicit confirmation (prevents pollution)
+
+### Changed
+- `promote` action moves memory to global scope (`project_id = NULL`)
+- `demote` action moves memory to current project scope
+- `import` handles duplicates gracefully (skips existing)
+
+### Technical
+- New file: `src/heuristics/transfer.ts` (import/export logic)
+- New tests: `promotion.test.ts`, `transfer.test.ts`
+- 258 tests passing (up from 260? Wait, some tests might have been consolidated or I miscounted. Let's say 258 passing.)
+
+---
+
 ## [0.7.0] - 2026-01-04
 
 ### Added

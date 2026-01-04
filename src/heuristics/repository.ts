@@ -321,3 +321,79 @@ export function getMemoryChain(ctxOrId: SemanthiccContext | number, memoryId?: n
 
   return chain;
 }
+
+export function promoteMemory(
+  ctxOrId: SemanthiccContext | number,
+  idOrForce?: number | boolean,
+  force?: boolean
+): Memory | null {
+  let ctx: SemanthiccContext;
+  let memoryId: number;
+  let forcePromote: boolean;
+
+  if (typeof ctxOrId === "number") {
+    ctx = getLegacyContext();
+    memoryId = ctxOrId;
+    forcePromote = (idOrForce as boolean) ?? false;
+  } else {
+    ctx = ctxOrId;
+    memoryId = idOrForce as number;
+    forcePromote = force ?? false;
+  }
+
+  const memory = getMemory(ctx, memoryId);
+  if (!memory) return null;
+  
+  if (memory.project_id === null) return memory;
+
+  // Safety check: Global rules must have a domain to prevent pollution
+  if (!memory.domain && !forcePromote) {
+    throw new Error(
+      "Cannot promote domain-less rule to global scope. It would apply to ALL projects. " +
+      "Set a domain first or use force=true."
+    );
+  }
+
+  const stmt = ctx.db.prepare(`
+    UPDATE memories 
+    SET project_id = NULL, updated_at = ? 
+    WHERE id = ?
+    RETURNING *
+  `);
+  
+  return stmt.get(Date.now(), memoryId) as Memory;
+}
+
+export function demoteMemory(
+  ctxOrId: SemanthiccContext | number,
+  idOrProjectId?: number,
+  targetProjectId?: number
+): Memory | null {
+  let ctx: SemanthiccContext;
+  let memoryId: number;
+  let projectId: number;
+
+  if (typeof ctxOrId === "number") {
+    ctx = getLegacyContext();
+    memoryId = ctxOrId;
+    projectId = idOrProjectId!;
+  } else {
+    ctx = ctxOrId;
+    memoryId = idOrProjectId!;
+    projectId = targetProjectId!;
+  }
+
+  const memory = getMemory(ctx, memoryId);
+  if (!memory) return null;
+  
+  if (memory.project_id === projectId) return memory;
+
+  const stmt = ctx.db.prepare(`
+    UPDATE memories 
+    SET project_id = ?, updated_at = ? 
+    WHERE id = ?
+    RETURNING *
+  `);
+  
+  return stmt.get(projectId, Date.now(), memoryId) as Memory;
+}

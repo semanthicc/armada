@@ -4,11 +4,14 @@ import { getOrCreateProject } from "./hooks/auto-register";
 import { getHeuristicsContext } from "./hooks/heuristics-injector";
 import { createPassiveLearner } from "./hooks/passive-learner";
 import { isToolError } from "./hooks/error-detect";
-import { addMemory, deleteMemory, listMemories, supersedeMemory, archiveMemory } from "./heuristics";
+import { addMemory, deleteMemory, listMemories, supersedeMemory, archiveMemory, promoteMemory, demoteMemory } from "./heuristics";
+import { exportMemories, importMemories } from "./heuristics/transfer";
 import { detectHistoryIntent } from "./heuristics/intent";
 import { indexProject, getIndexStats } from "./indexer";
 import { searchCode, formatSearchResultsForTool } from "./search";
 import { getStatus, formatStatus } from "./status";
+import { readFileSync, writeFileSync } from "node:fs";
+import { join, isAbsolute } from "node:path";
 
 export type * from "./types";
 
@@ -92,14 +95,14 @@ export const SemanthiccPlugin: Plugin = async (ctx: PluginInput) => {
 
     tool: {
       semanthicc: tool({
-        description: "Semantic code search and memory management. Actions: search (find code by meaning), index (index project for search), status (check index), remember (add pattern/heuristic), forget (remove memory), list (show memories), supersede (replace old memory with evolved version), failure-fixed (mark a passive failure as resolved)",
+        description: "Semantic code search and memory management. Actions: search, index, status, remember, forget, list, supersede, failure-fixed, promote, demote, import, export",
         args: {
           action: tool.schema
-            .enum(["search", "index", "status", "remember", "forget", "list", "supersede", "failure-fixed"])
+            .enum(["search", "index", "status", "remember", "forget", "list", "supersede", "failure-fixed", "promote", "demote", "import", "export"])
             .describe("Action to perform"),
           query: tool.schema
             .string()
-            .describe("Search query or content to remember")
+            .describe("Search query, content to remember, or file path for import/export")
             .optional(),
           type: tool.schema
             .enum(["pattern", "decision", "constraint", "learning", "context", "rule"])
@@ -115,7 +118,7 @@ export const SemanthiccPlugin: Plugin = async (ctx: PluginInput) => {
             .optional(),
           id: tool.schema
             .number()
-            .describe("Memory ID (for forget action)")
+            .describe("Memory ID (for forget/promote/demote actions)")
             .optional(),
           limit: tool.schema
             .number()
@@ -125,9 +128,13 @@ export const SemanthiccPlugin: Plugin = async (ctx: PluginInput) => {
             .boolean()
             .describe("Include superseded memories in list results")
             .optional(),
+          force: tool.schema
+            .boolean()
+            .describe("Force action (e.g. promote without domain)")
+            .optional(),
         },
         async execute(args) {
-          const { action, query, type, domain, global: isGlobal, id, limit = 5, includeHistory } = args;
+          const { action, query, type, domain, global: isGlobal, id, limit = 5, includeHistory, force } = args;
           const project = getOrCreateProject(directory);
 
           switch (action) {
@@ -138,7 +145,7 @@ export const SemanthiccPlugin: Plugin = async (ctx: PluginInput) => {
               if (!project) {
                 return "Error: Not in a git repository. Run 'index' action from within a git project.";
               }
-              const stats = getIndexStats(project.id);
+              const stats = await getIndexStats(project.id);
               if (stats.chunkCount === 0) {
                 return "Error: Project not indexed. Run 'index' action first.";
               }
@@ -215,15 +222,62 @@ export const SemanthiccPlugin: Plugin = async (ctx: PluginInput) => {
               return `Superseded memory ${id} with new memory ${result.new.id}.\nOld: ${result.old.content}\nNew: ${result.new.content}`;
             }
 
-            case "failure-fixed": {
+            case "promote": {
               if (!id) {
-                return "Error: Memory ID (id) is required for failure-fixed";
+                return "Error: Memory ID (id) is required for promote";
               }
-              const result = archiveMemory(id);
-              if (result) {
-                return `Failure memory ${id} marked as fixed (archived).`;
+              try {
+                const result = promoteMemory(id, force);
+                if (!result) return `Error: Memory ${id} not found`;
+                if (result.project_id === null) return `Memory ${id} is already global.`;
+                return `Promoted memory ${id} to global scope.`;
+              } catch (e) {
+                return `Error: ${e instanceof Error ? e.message : String(e)}`;
               }
-              return `Error: Memory ${id} not found.`;
+            }
+
+            case "demote": {
+              if (!id) {
+                return "Error: Memory ID (id) is required for demote";
+              }
+              if (!project) {
+                return "Error: Not in a project context. Cannot demote to unknown project.";
+              }
+              const result = demoteMemory(id, project.id);
+              if (!result) return `Error: Memory ${id} not found`;
+              if (result.project_id === project.id) return `Memory ${id} is already scoped to this project.`;
+              return `Demoted memory ${id} to project '${project.name}'.`;
+            }
+
+            case "export": {
+              const json = exportMemories(project?.id ?? null);
+              if (query) {
+                const filePath = isAbsolute(query) ? query : join(directory, query);
+                writeFileSync(filePath, json);
+                return `Exported memories to ${filePath}`;
+              }
+              return json;
+            }
+
+            case "import": {
+              if (!query) {
+                return "Error: File path or JSON content (query) is required for import";
+              }
+              let json = query;
+              if (query.endsWith(".json") || query.includes("/") || query.includes("\\")) {
+                const filePath = isAbsolute(query) ? query : join(directory, query);
+                try {
+                  json = readFileSync(filePath, "utf-8");
+                } catch {
+                  // Fallback to treating query as raw JSON
+                }
+              }
+              
+              const result = importMemories(project?.id ?? null, json);
+              if (result.errors.length > 0) {
+                return `Imported ${result.added} memories. Skipped ${result.skipped} duplicates.\nErrors:\n${result.errors.join("\n")}`;
+              }
+              return `Successfully imported ${result.added} memories. Skipped ${result.skipped} duplicates.`;
             }
 
             default:

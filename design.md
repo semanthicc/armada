@@ -630,6 +630,33 @@ Memories: 12 total
 
 ---
 
+### ADR-016: Safe Knowledge Mobility (v0.8.0)
+
+**Status**: ACCEPTED
+
+**Context**: Users want to share heuristics across projects or make them global, but this risks polluting other projects with irrelevant rules.
+
+**Decision**: Implement explicit promotion/demotion with strict domain enforcement.
+
+**Rules**:
+1. **Global = Universal**: A global rule applies to ALL projects.
+2. **Project = Specific**: A project rule applies only to that project.
+3. **Promotion Safety**: Promoting a rule to global REQUIRES a domain tag (unless forced).
+   - "Use React" (domain: react) -> Global OK (only injects for React projects)
+   - "Use React" (domain: null) -> Global BLOCKED (would inject for Python projects)
+
+**Commands**:
+- `semanthicc promote <id>`: Move to global (project_id = NULL)
+- `semanthicc demote <id>`: Move to current project
+- `semanthicc import/export`: JSON sharing
+
+**Rationale**:
+- Prevents context pollution
+- Respects the "Global vs Project" hierarchy
+- Simple CRUD operations, no complex sync logic
+
+---
+
 ## PART 5: Data Model
 
 ### Core Schema
