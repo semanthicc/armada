@@ -7,6 +7,34 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ---
 
+## [0.4.0] - 2026-01-04
+
+### Added
+- **Context/DI Architecture**: All database operations now support dependency injection via `SemanthiccContext`
+- **Test Harness**: `createTestContext()` provides perfect test isolation with in-memory SQLite
+- **Passive Learning**: Automatic tool failure capture via `tool.execute.after` hook
+- **Error Detection**: `isToolError()` heuristics for detecting errors in tool output
+- `failure-fixed` action: Mark captured failures as resolved
+
+### Changed
+- All modules (repository, project-detect, similarity, indexer, search) refactored to context-first pattern
+- Backward-compatible: Legacy singleton pattern still works for production
+- `getDb()` now preserves current DB connection when called without args (prevents test→production DB switch)
+- Plugin now initializes per-session passive learners for failure tracking
+
+### Fixed
+- **Critical**: DB singleton was switching from test DB to production DB mid-test
+- Test pollution: Tests now fully isolated with `clearTables()` helper
+
+### Technical
+- New files: `src/context.ts`, `src/db/test-utils.ts`, `src/hooks/error-detect.ts`
+- New modules: `src/hooks/keywords.ts`, `src/hooks/similarity.ts`, `src/hooks/passive-learner.ts`
+- 138 passing tests (up from 102)
+- Schema migration: `keywords TEXT` column for failure matching
+- Plugin hook: `tool.execute.after` wired for passive learning
+
+---
+
 ## [0.3.0] - 2026-01-03
 
 ### Added
@@ -85,6 +113,6 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 |---------|-----------|--------|
 | 0.1.0 | MVP-1: Heuristics | ✅ Complete |
 | 0.2.0 | MVP-2: Semantic code search (MiniLM embeddings) | ✅ Complete |
-| 0.3.0 | MVP-3: Knowledge evolution (supersede/archive) | 🔲 Planned |
-| 0.4.0 | MVP-4: Passive learning (tool outcome capture) | 🔲 Planned |
+| 0.3.0 | MVP-3: Knowledge evolution (supersede/archive) | ✅ Complete |
+| 0.4.0 | MVP-4: Context/DI architecture + Passive learning infra | ✅ Complete |
 | 1.0.0 | Full release: All MVPs integrated | 🔲 Planned |

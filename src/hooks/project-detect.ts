@@ -1,12 +1,18 @@
 import { getDb } from "../db";
+import type { SemanthiccContext } from "../context";
 import type { Project } from "../types";
 
-export function getCurrentProject(cwd: string): Project | null {
-  const db = getDb();
+function getLegacyContext(): SemanthiccContext {
+  return { db: getDb() };
+}
+
+export function getCurrentProject(ctxOrCwd: SemanthiccContext | string, cwd?: string): Project | null {
+  const ctx = cwd ? (ctxOrCwd as SemanthiccContext) : getLegacyContext();
+  const cwdPath = cwd ?? (ctxOrCwd as string);
   
-  const normalizedCwd = cwd.replace(/\\/g, "/");
+  const normalizedCwd = cwdPath.replace(/\\/g, "/");
   
-  const stmt = db.prepare(`
+  const stmt = ctx.db.prepare(`
     SELECT * FROM projects 
     WHERE ? LIKE REPLACE(path, '\\', '/') || '%'
     AND type = 'active'
@@ -17,12 +23,24 @@ export function getCurrentProject(cwd: string): Project | null {
   return stmt.get(normalizedCwd) as Project | null;
 }
 
-export function registerProject(path: string, name?: string): Project {
-  const db = getDb();
+export function registerProject(ctxOrPath: SemanthiccContext | string, pathOrName?: string, name?: string): Project {
+  let ctx: SemanthiccContext;
+  let projectPath: string;
+  let projectName: string | undefined;
   
-  const normalizedPath = path.replace(/\\/g, "/");
+  if (typeof ctxOrPath === "string") {
+    ctx = getLegacyContext();
+    projectPath = ctxOrPath;
+    projectName = pathOrName;
+  } else {
+    ctx = ctxOrPath;
+    projectPath = pathOrName!;
+    projectName = name;
+  }
   
-  const stmt = db.prepare(`
+  const normalizedPath = projectPath.replace(/\\/g, "/");
+  
+  const stmt = ctx.db.prepare(`
     INSERT INTO projects (path, name, type)
     VALUES (?, ?, 'active')
     ON CONFLICT(path) DO UPDATE SET
@@ -31,11 +49,11 @@ export function registerProject(path: string, name?: string): Project {
     RETURNING *
   `);
   
-  return stmt.get(normalizedPath, name ?? null) as Project;
+  return stmt.get(normalizedPath, projectName ?? null) as Project;
 }
 
-export function listProjects(): Project[] {
-  const db = getDb();
-  const stmt = db.prepare("SELECT * FROM projects ORDER BY updated_at DESC");
+export function listProjects(ctx?: SemanthiccContext): Project[] {
+  const context = ctx ?? getLegacyContext();
+  const stmt = context.db.prepare("SELECT * FROM projects ORDER BY updated_at DESC");
   return stmt.all() as Project[];
 }

@@ -53,6 +53,7 @@ export interface Memory {
   source: MemorySource;
   source_session_id: string | null;
   source_tool: string | null;
+  keywords: string[] | null;
   created_at: number;
   updated_at: number;
 }
@@ -69,4 +70,5 @@ export interface CreateMemoryInput {
   source?: MemorySource;
   source_session_id?: string;
   source_tool?: string;
+  keywords?: string; 
 }

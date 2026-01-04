@@ -4,6 +4,7 @@ import { join, dirname } from "node:path";
 import { mkdirSync, existsSync, readFileSync } from "node:fs";
 
 let db: Database | null = null;
+let currentDbPath: string | null = null;
 
 export function getDbPath(): string {
   if (process.platform === "win32") {
@@ -24,15 +25,33 @@ function runSchema(database: Database): void {
   const schemaPath = join(import.meta.dir, "schema.sql");
   const schema = readFileSync(schemaPath, "utf-8");
   database.exec(schema);
+  
+  // Migration: add keywords column if missing (v0.4.0)
+  const columns = database.prepare("PRAGMA table_info(memories)").all() as { name: string }[];
+  const hasKeywords = columns.some(col => col.name === "keywords");
+  if (!hasKeywords) {
+    database.exec("ALTER TABLE memories ADD COLUMN keywords TEXT");
+  }
 }
 
 export function getDb(customPath?: string): Database {
-  if (db) return db;
+  // If no custom path specified and we already have a DB open, return it
+  // This prevents tests from accidentally switching back to production DB
+  if (!customPath && db) {
+    return db;
+  }
   
   const dbPath = customPath || getDbPath();
+
+  if (db) {
+    if (currentDbPath === dbPath) return db;
+    db.close();
+  }
+  
   ensureDbDir(dbPath);
   
   db = new Database(dbPath, { create: true });
+  currentDbPath = dbPath;
   runSchema(db);
   
   return db;
@@ -42,9 +61,18 @@ export function closeDb(): void {
   if (db) {
     db.close();
     db = null;
+    currentDbPath = null;
   }
 }
 
 export function resetDb(): void {
   closeDb();
+}
+
+export function clearAllTables(database?: Database): void {
+  const target = database || db;
+  if (!target) return;
+  target.exec("DELETE FROM embeddings");
+  target.exec("DELETE FROM memories"); 
+  target.exec("DELETE FROM projects");
 }

@@ -1,5 +1,10 @@
 import { getDb } from "../db";
+import type { SemanthiccContext } from "../context";
 import { embedText, bufferToEmbedding, cosineSimilarity, findTopK } from "../embeddings";
+
+function getLegacyContext(): SemanthiccContext {
+  return { db: getDb() };
+}
 
 export interface SearchResult {
   id: number;
@@ -11,14 +16,31 @@ export interface SearchResult {
 }
 
 export async function searchCode(
-  query: string,
-  projectId: number,
-  limit = 5
+  ctxOrQuery: SemanthiccContext | string,
+  queryOrProjectId: string | number,
+  projectIdOrLimit?: number,
+  limit?: number
 ): Promise<SearchResult[]> {
-  const db = getDb();
+  let ctx: SemanthiccContext;
+  let query: string;
+  let projectId: number;
+  let resultLimit: number;
+
+  if (typeof ctxOrQuery === "string") {
+    ctx = getLegacyContext();
+    query = ctxOrQuery;
+    projectId = queryOrProjectId as number;
+    resultLimit = projectIdOrLimit ?? 5;
+  } else {
+    ctx = ctxOrQuery;
+    query = queryOrProjectId as string;
+    projectId = projectIdOrLimit!;
+    resultLimit = limit ?? 5;
+  }
+
   const queryEmbedding = await embedText(query);
   
-  const stmt = db.prepare(`
+  const stmt = ctx.db.prepare(`
     SELECT id, file_path, chunk_start, chunk_end, content, embedding
     FROM embeddings
     WHERE project_id = ? AND is_stale = 0
@@ -51,23 +73,36 @@ export async function searchCode(
     };
   });
   
-  return findTopK(withSimilarity, limit);
+  return findTopK(withSimilarity, resultLimit);
 }
 
 export function searchByFilePattern(
-  projectId: number,
-  pattern: string
+  ctxOrProjectId: SemanthiccContext | number,
+  projectIdOrPattern: number | string,
+  pattern?: string
 ): SearchResult[] {
-  const db = getDb();
-  
-  const stmt = db.prepare(`
+  let ctx: SemanthiccContext;
+  let projectId: number;
+  let filePattern: string;
+
+  if (typeof ctxOrProjectId === "number") {
+    ctx = getLegacyContext();
+    projectId = ctxOrProjectId;
+    filePattern = projectIdOrPattern as string;
+  } else {
+    ctx = ctxOrProjectId;
+    projectId = projectIdOrPattern as number;
+    filePattern = pattern!;
+  }
+
+  const stmt = ctx.db.prepare(`
     SELECT id, file_path, chunk_start, chunk_end, content
     FROM embeddings
     WHERE project_id = ? AND file_path LIKE ? AND is_stale = 0
     ORDER BY file_path, chunk_start
   `);
   
-  const likePattern = pattern.replace(/\*/g, "%");
+  const likePattern = filePattern.replace(/\*/g, "%");
   
   return stmt.all(projectId, likePattern).map(row => ({
     ...(row as {

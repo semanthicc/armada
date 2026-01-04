@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS memories (
   source TEXT DEFAULT 'explicit' CHECK(source IN ('explicit', 'passive', 'supersede')),
   source_session_id TEXT,
   source_tool TEXT,
+  keywords TEXT, 
   created_at INTEGER DEFAULT (unixepoch('now') * 1000),
   updated_at INTEGER DEFAULT (unixepoch('now') * 1000)
 );

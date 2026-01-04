@@ -1,4 +1,5 @@
 import { getDb } from "../db";
+import type { SemanthiccContext } from "../context";
 import type { Memory, CreateMemoryInput, MemoryWithEffectiveConfidence } from "../types";
 import {
   HEURISTICS,
@@ -9,47 +10,65 @@ import {
   shouldDemoteFromGolden,
 } from "./confidence";
 
-export function addMemory(input: CreateMemoryInput): Memory {
-  const db = getDb();
-  const stmt = db.prepare(`
-    INSERT INTO memories (concept_type, content, domain, project_id, source, source_session_id, source_tool)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+function getLegacyContext(): SemanthiccContext {
+  return { db: getDb() };
+}
+
+export function addMemory(ctxOrInput: SemanthiccContext | CreateMemoryInput, input?: CreateMemoryInput): Memory {
+  const ctx = input ? (ctxOrInput as SemanthiccContext) : getLegacyContext();
+  const data = input ?? (ctxOrInput as CreateMemoryInput);
+  
+  const stmt = ctx.db.prepare(`
+    INSERT INTO memories (concept_type, content, domain, project_id, source, source_session_id, source_tool, keywords)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     RETURNING *
   `);
 
   return stmt.get(
-    input.concept_type,
-    input.content,
-    input.domain ?? null,
-    input.project_id ?? null,
-    input.source ?? "explicit",
-    input.source_session_id ?? null,
-    input.source_tool ?? null
+    data.concept_type,
+    data.content,
+    data.domain ?? null,
+    data.project_id ?? null,
+    data.source ?? "explicit",
+    data.source_session_id ?? null,
+    data.source_tool ?? null,
+    data.keywords ?? null
   ) as Memory;
 }
 
-export function getMemory(id: number): Memory | null {
-  const db = getDb();
-  const stmt = db.prepare("SELECT * FROM memories WHERE id = ?");
-  return stmt.get(id) as Memory | null;
+export function getMemory(ctxOrId: SemanthiccContext | number, id?: number): Memory | null {
+  const ctx = typeof id === "number" ? (ctxOrId as SemanthiccContext) : getLegacyContext();
+  const memoryId = id ?? (ctxOrId as number);
+  
+  const stmt = ctx.db.prepare("SELECT * FROM memories WHERE id = ?");
+  return stmt.get(memoryId) as Memory | null;
 }
 
-export function deleteMemory(id: number): boolean {
-  const db = getDb();
-  const stmt = db.prepare("DELETE FROM memories WHERE id = ?");
-  const result = stmt.run(id);
+export function deleteMemory(ctxOrId: SemanthiccContext | number, id?: number): boolean {
+  const ctx = typeof id === "number" ? (ctxOrId as SemanthiccContext) : getLegacyContext();
+  const memoryId = id ?? (ctxOrId as number);
+  
+  const stmt = ctx.db.prepare("DELETE FROM memories WHERE id = ?");
+  const result = stmt.run(memoryId);
   return result.changes > 0;
 }
 
-export function listMemories(options: {
+export interface ListMemoriesOptions {
   projectId?: number | null;
   domain?: string;
   conceptTypes?: string[];
   includeGlobal?: boolean;
   includeHistory?: boolean;
   limit?: number;
-}): MemoryWithEffectiveConfidence[] {
-  const db = getDb();
+}
+
+export function listMemories(
+  ctxOrOptions: SemanthiccContext | ListMemoriesOptions,
+  options?: ListMemoriesOptions
+): MemoryWithEffectiveConfidence[] {
+  const ctx = options ? (ctxOrOptions as SemanthiccContext) : getLegacyContext();
+  const opts = options ?? (ctxOrOptions as ListMemoriesOptions);
+  
   const {
     projectId = null,
     domain,
@@ -57,7 +76,7 @@ export function listMemories(options: {
     includeGlobal = true,
     includeHistory = false,
     limit = HEURISTICS.MAX_INJECTION_COUNT,
-  } = options;
+  } = opts;
 
   let sql = `
     SELECT * FROM memories 
@@ -88,7 +107,7 @@ export function listMemories(options: {
   sql += " ORDER BY is_golden DESC, confidence DESC";
   sql += ` LIMIT ${limit * 2}`;
 
-  const stmt = db.prepare(sql);
+  const stmt = ctx.db.prepare(sql);
   const memories = stmt.all(...params) as Memory[];
 
   return memories
@@ -107,9 +126,11 @@ export function listMemories(options: {
     .slice(0, limit);
 }
 
-export function validateMemory(id: number): Memory | null {
-  const db = getDb();
-  const memory = getMemory(id);
+export function validateMemory(ctxOrId: SemanthiccContext | number, id?: number): Memory | null {
+  const ctx = typeof id === "number" ? (ctxOrId as SemanthiccContext) : getLegacyContext();
+  const memoryId = id ?? (ctxOrId as number);
+  
+  const memory = getMemory(ctx, memoryId);
   if (!memory) return null;
 
   const newConfidence = calculateValidatedConfidence(memory.confidence);
@@ -120,7 +141,7 @@ export function validateMemory(id: number): Memory | null {
     memory.times_violated
   );
 
-  const stmt = db.prepare(`
+  const stmt = ctx.db.prepare(`
     UPDATE memories SET
       times_validated = ?,
       confidence = ?,
@@ -138,20 +159,22 @@ export function validateMemory(id: number): Memory | null {
     promoteToGolden ? 1 : (memory.is_golden ? 1 : 0),
     now,
     now,
-    id
+    memoryId
   ) as Memory;
 }
 
-export function violateMemory(id: number): Memory | null {
-  const db = getDb();
-  const memory = getMemory(id);
+export function violateMemory(ctxOrId: SemanthiccContext | number, id?: number): Memory | null {
+  const ctx = typeof id === "number" ? (ctxOrId as SemanthiccContext) : getLegacyContext();
+  const memoryId = id ?? (ctxOrId as number);
+  
+  const memory = getMemory(ctx, memoryId);
   if (!memory) return null;
 
   const newConfidence = calculateViolatedConfidence(memory.confidence);
   const newTimesViolated = memory.times_violated + 1;
   const demoteFromGolden = memory.is_golden && shouldDemoteFromGolden(newTimesViolated);
 
-  const stmt = db.prepare(`
+  const stmt = ctx.db.prepare(`
     UPDATE memories SET
       times_violated = ?,
       confidence = ?,
@@ -166,22 +189,44 @@ export function violateMemory(id: number): Memory | null {
     newConfidence,
     demoteFromGolden ? 0 : (memory.is_golden ? 1 : 0),
     Date.now(),
-    id
+    memoryId
   ) as Memory;
 }
 
+export interface SupersedeResult {
+  old: Memory;
+  new: Memory;
+}
+
 export function supersedeMemory(
-  oldId: number,
-  newContent: string,
+  ctxOrOldId: SemanthiccContext | number,
+  oldIdOrNewContent: number | string,
+  newContentOrNote?: string,
   evolutionNote?: string
-): { old: Memory; new: Memory } | null {
-  const db = getDb();
-  const oldMemory = getMemory(oldId);
+): SupersedeResult | null {
+  let ctx: SemanthiccContext;
+  let oldId: number;
+  let newContent: string;
+  let note: string | undefined;
+  
+  if (typeof ctxOrOldId === "number") {
+    ctx = getLegacyContext();
+    oldId = ctxOrOldId;
+    newContent = oldIdOrNewContent as string;
+    note = newContentOrNote;
+  } else {
+    ctx = ctxOrOldId;
+    oldId = oldIdOrNewContent as number;
+    newContent = newContentOrNote!;
+    note = evolutionNote;
+  }
+  
+  const oldMemory = getMemory(ctx, oldId);
 
   if (!oldMemory) return null;
   if (oldMemory.status !== "current") return null;
 
-  const newMemory = addMemory({
+  const newMemory = addMemory(ctx, {
     concept_type: oldMemory.concept_type,
     content: newContent,
     domain: oldMemory.domain ?? undefined,
@@ -190,7 +235,7 @@ export function supersedeMemory(
   });
 
   const now = Date.now();
-  const updateStmt = db.prepare(`
+  const updateStmt = ctx.db.prepare(`
     UPDATE memories SET
       status = 'superseded',
       superseded_by = ?,
@@ -199,26 +244,38 @@ export function supersedeMemory(
       updated_at = ?
     WHERE id = ?
   `);
-  updateStmt.run(newMemory.id, now, evolutionNote ?? null, now, oldId);
+  updateStmt.run(newMemory.id, now, note ?? null, now, oldId);
 
-  const setEvolvedStmt = db.prepare(`
+  const setEvolvedStmt = ctx.db.prepare(`
     UPDATE memories SET evolved_from = ? WHERE id = ?
   `);
   setEvolvedStmt.run(oldId, newMemory.id);
 
   return {
-    old: getMemory(oldId)!,
-    new: getMemory(newMemory.id)!,
+    old: getMemory(ctx, oldId)!,
+    new: getMemory(ctx, newMemory.id)!,
   };
 }
 
-export function getMemoryChain(memoryId: number): Memory[] {
-  const start = getMemory(memoryId);
+export function archiveMemory(ctxOrId: SemanthiccContext | number, id?: number): boolean {
+  const ctx = typeof id === "number" ? (ctxOrId as SemanthiccContext) : getLegacyContext();
+  const memoryId = id ?? (ctxOrId as number);
+  
+  const stmt = ctx.db.prepare("UPDATE memories SET status = 'archived', updated_at = ? WHERE id = ?");
+  const result = stmt.run(Date.now(), memoryId);
+  return result.changes > 0;
+}
+
+export function getMemoryChain(ctxOrId: SemanthiccContext | number, memoryId?: number): Memory[] {
+  const ctx = typeof memoryId === "number" ? (ctxOrId as SemanthiccContext) : getLegacyContext();
+  const id = memoryId ?? (ctxOrId as number);
+  
+  const start = getMemory(ctx, id);
   if (!start) return [];
 
   let root = start;
   while (root.evolved_from) {
-    const parent = getMemory(root.evolved_from);
+    const parent = getMemory(ctx, root.evolved_from);
     if (!parent) break;
     root = parent;
   }
@@ -226,7 +283,7 @@ export function getMemoryChain(memoryId: number): Memory[] {
   const chain: Memory[] = [root];
   let current = root;
   while (current.superseded_by) {
-    const next = getMemory(current.superseded_by);
+    const next = getMemory(ctx, current.superseded_by);
     if (!next) break;
     chain.push(next);
     current = next;

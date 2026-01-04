@@ -1,5 +1,5 @@
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
-import { getDb, resetDb } from "./db";
+import { getDb, resetDb, clearAllTables } from "./db";
 import { join } from "node:path";
 import { unlinkSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -41,7 +41,8 @@ type SystemTransformHook = (input: Record<string, unknown>, output: { system: st
 describe("Plugin", () => {
   beforeEach(() => {
     testDbPath = getTestDbPath();
-    getDb(testDbPath);
+    const db = getDb(testDbPath);
+    clearAllTables(db);
   });
 
   afterEach(() => {

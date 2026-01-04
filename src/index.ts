@@ -2,7 +2,9 @@ import type { Plugin, PluginInput } from "@opencode-ai/plugin";
 import { tool } from "@opencode-ai/plugin";
 import { getOrCreateProject } from "./hooks/auto-register";
 import { getHeuristicsContext } from "./hooks/heuristics-injector";
-import { addMemory, deleteMemory, listMemories, supersedeMemory } from "./heuristics";
+import { createPassiveLearner } from "./hooks/passive-learner";
+import { isToolError } from "./hooks/error-detect";
+import { addMemory, deleteMemory, listMemories, supersedeMemory, archiveMemory } from "./heuristics";
 import { detectHistoryIntent } from "./heuristics/intent";
 import { indexProject, getIndexStats } from "./indexer";
 import { searchCode, formatSearchResultsForTool } from "./search";
@@ -11,17 +13,56 @@ export type * from "./types";
 
 export const SemanthiccPlugin: Plugin = async (ctx: PluginInput) => {
   const { directory } = ctx;
+  const project = getOrCreateProject(directory);
+  
+  const sessionLearners = new Map<string, ReturnType<typeof createPassiveLearner>>();
+  
+  function getLearner(sessionID: string) {
+    let learner = sessionLearners.get(sessionID);
+    if (!learner) {
+      learner = createPassiveLearner(project?.id ?? null, sessionID);
+      sessionLearners.set(sessionID, learner);
+    }
+    return learner;
+  }
 
   return {
     name: "semanthicc",
+
+    "tool.execute.after": async (
+      input: { tool: string; sessionID: string; callID: string },
+      output: { title: string; output: string; metadata: unknown }
+    ) => {
+      try {
+        if (!output) return;
+        
+        const isError = isToolError(output.output, output.title);
+        const learner = getLearner(input.sessionID);
+        
+        learner.handleToolOutcome(
+          { tool: { name: input.tool, parameters: {} } },
+          { content: output.output, isError }
+        );
+      } catch (error) {
+        console.error("Semanthicc: Error in tool.execute.after hook", error);
+      }
+    },
 
     "chat.params": async (params: Record<string, unknown>) => {
       try {
         const input = params.input as Record<string, unknown> | undefined;
         if (!input) return;
 
+        let userQuery: string | undefined;
+        if (Array.isArray(input.messages)) {
+          const lastMsg = input.messages[input.messages.length - 1];
+          if (lastMsg && typeof lastMsg === 'object' && lastMsg.role === 'user' && typeof lastMsg.content === 'string') {
+            userQuery = lastMsg.content;
+          }
+        }
+
         const project = getOrCreateProject(directory);
-        const heuristicsContext = getHeuristicsContext(project?.id ?? null);
+        const heuristicsContext = getHeuristicsContext(project?.id ?? null, userQuery);
 
         if (heuristicsContext) {
           const existingSystemPrompt = (input.systemPrompt as string) || "";
@@ -50,10 +91,10 @@ export const SemanthiccPlugin: Plugin = async (ctx: PluginInput) => {
 
     tool: {
       semanthicc: tool({
-        description: "Semantic code search and memory management. Actions: search (find code by meaning), index (index project for search), status (check index), remember (add pattern/heuristic), forget (remove memory), list (show memories), supersede (replace old memory with evolved version)",
+        description: "Semantic code search and memory management. Actions: search (find code by meaning), index (index project for search), status (check index), remember (add pattern/heuristic), forget (remove memory), list (show memories), supersede (replace old memory with evolved version), failure-fixed (mark a passive failure as resolved)",
         args: {
           action: tool.schema
-            .enum(["search", "index", "status", "remember", "forget", "list", "supersede"])
+            .enum(["search", "index", "status", "remember", "forget", "list", "supersede", "failure-fixed"])
             .describe("Action to perform"),
           query: tool.schema
             .string()
@@ -174,6 +215,17 @@ export const SemanthiccPlugin: Plugin = async (ctx: PluginInput) => {
                 return `Error: Memory ${id} not found or already superseded`;
               }
               return `Superseded memory ${id} with new memory ${result.new.id}.\nOld: ${result.old.content}\nNew: ${result.new.content}`;
+            }
+
+            case "failure-fixed": {
+              if (!id) {
+                return "Error: Memory ID (id) is required for failure-fixed";
+              }
+              const result = archiveMemory(id);
+              if (result) {
+                return `Failure memory ${id} marked as fixed (archived).`;
+              }
+              return `Error: Memory ${id} not found.`;
             }
 
             default:

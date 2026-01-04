@@ -2,7 +2,7 @@ import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 import { join } from "node:path";
 import { mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { getDb, resetDb } from "../db";
+import { getDb, resetDb, clearAllTables } from "../db";
 import { shouldExclude, isCodeFile } from "./exclusions";
 import { splitIntoChunks } from "./chunker";
 import { walkProject } from "./walker";
@@ -166,6 +166,7 @@ export function formatDate(date: Date): string {
     `.trim());
     
     getDb(testDbPath);
+    clearAllTables();
   });
 
   afterEach(() => {

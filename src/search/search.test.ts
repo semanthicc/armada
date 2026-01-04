@@ -2,7 +2,7 @@ import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 import { join } from "node:path";
 import { mkdirSync, writeFileSync, rmSync, existsSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { getDb, resetDb } from "../db";
+import { getDb, resetDb, clearAllTables } from "../db";
 import { indexProject } from "../indexer";
 import { searchCode } from "./search";
 import { formatSearchResults, formatSearchResultsForTool } from "./format";
@@ -67,6 +67,7 @@ export function sleep(ms: number): Promise<void> {
     `.trim());
     
     getDb(testDbPath);
+    clearAllTables();
     const result = await indexProject(testDir);
     projectId = result.projectId;
   }, 60000);
