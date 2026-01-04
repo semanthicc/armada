@@ -2,6 +2,40 @@
   let status = $state(null);
   let loading = $state(true);
   let error = $state(null);
+
+  let projects = $state([]);
+  let selectedProjectId = $state(null);
+
+  function api(path) {
+    if (!selectedProjectId) return path;
+    return path + (path.includes('?') ? '&' : '?') + 'project_id=' + selectedProjectId;
+  }
+
+  async function fetchProjects() {
+    try {
+      const res = await fetch('/api/projects');
+      if (res.ok) projects = await res.json();
+    } catch (e) {
+      console.error('Failed to fetch projects', e);
+    }
+  }
+
+  function switchProject() {
+    const url = new URL(window.location);
+    if (selectedProjectId) {
+      url.searchParams.set('project', selectedProjectId);
+    } else {
+      url.searchParams.delete('project');
+    }
+    window.history.pushState({}, '', url);
+  }
+
+  // Init
+  const urlParams = new URLSearchParams(window.location.search);
+  const pidParam = urlParams.get('project');
+  if (pidParam) selectedProjectId = Number(pidParam);
+  fetchProjects();
+
   let tab = $state('overview');
   
   let searchQuery = $state('');
@@ -42,7 +76,7 @@
   async function fetchDuplicates() {
     try {
       console.log('[debug] Fetching duplicates...');
-      const res = await fetch('/api/duplicates');
+      const res = await fetch(api('/api/duplicates'));
       const data = await res.json();
       duplicatesCount = data.length;
     } catch (e) {
@@ -54,7 +88,7 @@
     if (!confirm(`Purge ${duplicatesCount} duplicate groups?`)) return;
     console.log('[debug] Purging duplicates...');
     try {
-      const res = await fetch('/api/duplicates', { method: 'DELETE' });
+      const res = await fetch(api('/api/duplicates'), { method: 'DELETE' });
       const data = await res.json();
       alert(`Deleted ${data.deleted} duplicates.`);
       fetchMemories();
@@ -72,7 +106,7 @@
     console.log('[debug] Deleting index...');
     
     try {
-      const res = await fetch('/api/index', { method: 'DELETE' });
+      const res = await fetch(api('/api/index'), { method: 'DELETE' });
       const data = await res.json();
       
       if (!res.ok) throw new Error(res.statusText);
@@ -91,7 +125,7 @@
 
   async function fetchConfig() {
     try {
-      const res = await fetch('/api/config');
+      const res = await fetch(api('/api/config'));
       if (!res.ok) throw new Error(res.statusText);
       const data = await res.json();
       if (data.embedding) {
@@ -121,7 +155,7 @@
         payload.embedding.geminiApiKey = geminiApiKey;
       }
 
-      const res = await fetch('/api/config', {
+      const res = await fetch(api('/api/config'), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -149,7 +183,7 @@
     console.log('[debug] Starting index...');
     
     try {
-      const res = await fetch('/api/index', { method: 'POST' });
+      const res = await fetch(api('/api/index'), { method: 'POST' });
       
       if (!res.ok) throw new Error(res.statusText);
       
@@ -207,7 +241,7 @@
     if (!editingMemory) return;
     console.log('[debug] Saving memory...', editingMemory.id);
     try {
-      const res = await fetch(`/api/memories/${editingMemory.id}`, {
+      const res = await fetch(api(`/api/memories/${editingMemory.id}`), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -227,7 +261,7 @@
 
   async function fetchStatus() {
     try {
-      const res = await fetch('/api/status');
+      const res = await fetch(api('/api/status'));
       if (!res.ok) throw new Error(res.statusText);
       status = await res.json();
     } catch (e) {
@@ -241,7 +275,7 @@
     memoriesLoading = true;
     console.log('[debug] Fetching memories...');
     try {
-      const res = await fetch('/api/memories');
+      const res = await fetch(api('/api/memories'));
       memories = await res.json();
       console.log('[debug] Fetched memories:', memories.length, 'total');
       console.log('[debug] Sample memory:', memories[0]);
@@ -256,7 +290,7 @@
     if (!searchQuery) return;
     searchLoading = true;
     try {
-      const res = await fetch(`/api/search?q=${encodeURIComponent(searchQuery)}`);
+      const res = await fetch(api(`/api/search?q=${encodeURIComponent(searchQuery)}`));
       searchResults = await res.json();
     } finally {
       searchLoading = false;
@@ -266,7 +300,7 @@
   async function deleteMemory(id) {
     if (!confirm('Delete this memory?')) return;
     try {
-      const res = await fetch(`/api/memories/${id}`, { method: 'DELETE' });
+      const res = await fetch(api(`/api/memories/${id}`), { method: 'DELETE' });
       if (!res.ok) throw new Error(res.statusText);
       const data = await res.json();
       console.log(`[debug] Deleted id=${data.id}, starting undo timer`);
@@ -285,7 +319,7 @@
   async function undoDelete() {
     if (!toast.id) return;
     try {
-      const res = await fetch(`/api/memories/${toast.id}/restore`, { method: 'POST' });
+      const res = await fetch(api(`/api/memories/${toast.id}/restore`), { method: 'POST' });
       if (!res.ok) throw new Error(res.statusText);
       toast.visible = false;
       fetchMemories();
@@ -297,6 +331,21 @@
 
   $effect(() => {
     fetchStatus();
+  });
+
+  $effect(() => {
+    // When project changes, refresh current tab
+    if (selectedProjectId !== undefined) {
+      fetchStatus();
+      if (tab === 'memories') {
+        fetchMemories();
+        fetchDuplicates();
+      } else if (tab === 'search') {
+        searchResults = [];
+      } else if (tab === 'settings') {
+        fetchConfig();
+      }
+    }
   });
 
   $effect(() => {
@@ -314,6 +363,16 @@
 <app-shell>
   <app-header>
     <logo>Semanthicc</logo>
+    
+    <project-selector>
+      <select bind:value={selectedProjectId} onchange={switchProject}>
+        <option value={null}>Global</option>
+        {#each projects as p}
+          <option value={p.id}>{p.name} ({p.indexed_files} files)</option>
+        {/each}
+      </select>
+    </project-selector>
+
     <nav-bar>
       <tab-btn class:active={tab === 'overview'} onclick={() => tab = 'overview'} role="button" tabindex="0" onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && (tab = 'overview')}>Overview</tab-btn>
       <tab-btn class:active={tab === 'memories'} onclick={() => tab = 'memories'} role="button" tabindex="0" onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && (tab = 'memories')}>Memories</tab-btn>
@@ -355,16 +414,29 @@
         </type-list>
 
         <card-title>Index Management</card-title>
+        
+        <index-status>
+          <status-header>
+            <status-label>Index: {status.coverage?.coveragePercent || 0}%</status-label>
+            {#if status.coverage?.staleFiles > 0}
+              <warning-badge>{status.coverage.staleFiles} files changed</warning-badge>
+            {/if}
+          </status-header>
+          <progress-container class="coverage">
+            <progress-bar style="--percent: {status.coverage?.coveragePercent || 0}%"></progress-bar>
+          </progress-container>
+        </index-status>
+
         <index-actions>
           <action-btn 
             class="primary" 
             onclick={indexProject} 
-            disabled={indexing || deletingIndex}
+            disabled={indexing || deletingIndex || status.coverage?.coveragePercent === 100}
             role="button" 
             tabindex="0"
             onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && indexProject()}
           >
-            {indexing ? 'Indexing...' : 'Index Project'}
+            {indexing ? 'Indexing...' : 'Sync Index'}
           </action-btn>
 
           <action-btn 
@@ -594,6 +666,23 @@
     font-size: 1.5rem;
     font-weight: bold;
     display: block;
+    margin-right: 1rem;
+  }
+
+  project-selector {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    max-width: 300px;
+  }
+
+  project-selector select {
+    width: 100%;
+    padding: 0.5rem;
+    border-radius: 4px;
+    border: 1px solid #ccc;
+    font-size: 0.9rem;
+    background: white;
   }
 
   nav-bar {
@@ -669,6 +758,43 @@
   type-item {
     padding: 0.25rem 0;
     display: block;
+  }
+
+  index-status {
+    display: block;
+    margin-bottom: 1rem;
+  }
+
+  status-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+  }
+
+  status-label {
+    font-weight: bold;
+    font-size: 0.9rem;
+  }
+
+  warning-badge {
+    background: #fff3e0;
+    color: #e65100;
+    font-size: 0.8rem;
+    padding: 0.2rem 0.5rem;
+    border-radius: 4px;
+    border: 1px solid #ffe0b2;
+    font-weight: bold;
+  }
+
+  progress-container.coverage {
+    margin-top: 0;
+    background: #e0e0e0;
+  }
+
+  progress-container.coverage progress-bar {
+    width: var(--percent);
+    background: linear-gradient(90deg, #4caf50, #8bc34a);
   }
 
   index-actions {

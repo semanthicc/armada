@@ -1,5 +1,8 @@
 import { getDb } from "./db";
 import type { SemanthiccContext } from "./context";
+import { walkProject } from "./indexer/walker";
+import { hashFile } from "./indexer/hasher";
+import { getAllFileHashes } from "./lance/file-tracker";
 
 function getLegacyContext(): SemanthiccContext {
   return { db: getDb() };
@@ -22,6 +25,13 @@ export interface TypeBreakdown {
 export interface IndexStats {
   chunkCount: number;
   lastIndexedAt: number | null;
+}
+
+export interface IndexCoverage {
+  totalFiles: number;
+  indexedFiles: number;
+  staleFiles: number;
+  coveragePercent: number;
 }
 
 export interface ProjectStatus {
@@ -161,4 +171,35 @@ function formatTimeSince(timestamp: number): string {
   if (hours > 0) return `${hours}h ago`;
   if (minutes > 0) return `${minutes}m ago`;
   return "just now";
+}
+
+export async function getIndexCoverage(projectPath: string, projectId: number): Promise<IndexCoverage> {
+  const indexedMap = getAllFileHashes(projectId);
+  
+  let totalFiles = 0;
+  let indexedFiles = 0;
+  let staleFiles = 0;
+  
+  for await (const file of walkProject(projectPath)) {
+    totalFiles++;
+    const existingHash = indexedMap.get(file.relativePath);
+    
+    if (existingHash) {
+      const currentHash = hashFile(file.absolutePath);
+      if (currentHash === existingHash) {
+        indexedFiles++;
+      } else {
+        staleFiles++;
+      }
+    }
+  }
+  
+  const coveragePercent = totalFiles > 0 ? Math.round((indexedFiles / totalFiles) * 100) : 0;
+  
+  return {
+    totalFiles,
+    indexedFiles,
+    staleFiles,
+    coveragePercent,
+  };
 }

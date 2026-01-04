@@ -1,4 +1,4 @@
-import { getStatus } from "../status";
+import { getStatus, getIndexCoverage } from "../status";
 import { listMemories, deleteMemory, updateMemory, findDuplicates, purgeDuplicates, restoreMemory } from "../heuristics/repository";
 import { searchCode } from "../search/search";
 import { getDb } from "../db";
@@ -27,7 +27,24 @@ export async function handleRequest(
   try {
     if (path === "/status") {
       const status = getStatus(ctx, projectId);
-      return Response.json(status);
+      let coverage = null;
+      
+      if (status.projectPath && projectId) {
+        coverage = await getIndexCoverage(status.projectPath, projectId);
+      }
+      
+      return Response.json({ ...status, coverage });
+    }
+
+    if (path === "/projects") {
+      const projects = ctx.db.prepare(`
+        SELECT p.id, p.name, p.path, p.last_indexed_at,
+               (SELECT COUNT(*) FROM file_hashes WHERE project_id = p.id) as indexed_files
+        FROM projects p
+        ORDER BY p.last_indexed_at DESC NULLS LAST
+      `).all() as Array<{ id: number; name: string; path: string; last_indexed_at: number | null; indexed_files: number }>;
+      
+      return Response.json(projects);
     }
 
     if (path === "/memories") {

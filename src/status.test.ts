@@ -1,7 +1,12 @@
-import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach, beforeAll, afterAll } from "bun:test";
 import { createTestContext, type TestContext } from "./db/test-utils";
 import { addMemory } from "./heuristics/repository";
-import { getStatus, formatStatus } from "./status";
+import { getStatus, formatStatus, getIndexCoverage } from "./status";
+import { registerProject } from "./hooks/project-detect";
+import { updateFileHash } from "./lance/file-tracker";
+import { join } from "path";
+import { mkdirSync, writeFileSync, rmSync } from "fs";
+import { getDb } from "./db";
 
 describe("Status", () => {
   let ctx: TestContext;
@@ -130,5 +135,62 @@ describe("Status", () => {
       
       expect(formatted).toContain("✅");
     });
+  });
+});
+
+describe("getIndexCoverage", () => {
+  const testDir = join(process.cwd(), "test-coverage-project");
+  let projectId: number;
+
+  beforeAll(() => {
+    rmSync(testDir, { recursive: true, force: true });
+    mkdirSync(testDir, { recursive: true });
+    mkdirSync(join(testDir, "src"), { recursive: true });
+    
+    writeFileSync(join(testDir, "src", "file1.ts"), "export const a = 1;");
+    writeFileSync(join(testDir, "src", "file2.ts"), "export const b = 2;");
+    writeFileSync(join(testDir, "src", "file3.ts"), "export const c = 3;");
+    
+    const project = registerProject(testDir);
+    projectId = project.id;
+    
+    updateFileHash(projectId, "src/file1.ts", "hash1");
+    updateFileHash(projectId, "src/file2.ts", "hash2");
+  });
+
+  test("returns coverage stats structure", async () => {
+    const coverage = await getIndexCoverage(testDir, projectId);
+    
+    expect(coverage).toHaveProperty("totalFiles");
+    expect(coverage).toHaveProperty("indexedFiles");
+    expect(coverage).toHaveProperty("staleFiles");
+    expect(coverage).toHaveProperty("coveragePercent");
+  });
+
+  test("returns correct total file count", async () => {
+    const coverage = await getIndexCoverage(testDir, projectId);
+    
+    expect(coverage.totalFiles).toBe(3);
+  });
+
+  test("coverage percent is between 0 and 100", async () => {
+    const coverage = await getIndexCoverage(testDir, projectId);
+    
+    expect(coverage.coveragePercent).toBeGreaterThanOrEqual(0);
+    expect(coverage.coveragePercent).toBeLessThanOrEqual(100);
+  });
+
+  test("returns 0 coverage for non-existent project", async () => {
+    const coverage = await getIndexCoverage(testDir, 99999);
+    
+    expect(coverage.totalFiles).toBe(3);
+    expect(coverage.indexedFiles).toBe(0);
+    expect(coverage.coveragePercent).toBe(0);
+  });
+
+  afterAll(() => {
+    rmSync(testDir, { recursive: true, force: true });
+    const db = getDb();
+    db.prepare("DELETE FROM projects WHERE path LIKE ?").run(`%test-coverage-project%`);
   });
 });

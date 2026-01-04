@@ -3,19 +3,20 @@ import { mkdirSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { getOrCreateProject } from "./auto-register";
-import { resetDb } from "../db";
+import { getDb, closeDb, clearAllTables } from "../db";
 
 describe("getOrCreateProject", () => {
   let testDir: string;
 
   beforeEach(() => {
-    resetDb();
     testDir = join(tmpdir(), `auto-register-test-${Date.now()}`);
     mkdirSync(testDir, { recursive: true });
   });
 
   afterEach(() => {
     rmSync(testDir, { recursive: true, force: true });
+    const db = getDb();
+    db.prepare("DELETE FROM projects WHERE path LIKE ?").run(`%auto-register-test-%`);
   });
 
   test("returns null when not in a git repo", () => {
@@ -46,13 +47,14 @@ describe("getOrCreateProject", () => {
   });
 
   test("uses folder name as project name", () => {
-    const projectDir = join(testDir, "my-awesome-project");
+    const projectName = `test-project-${Date.now()}`;
+    const projectDir = join(testDir, projectName);
     mkdirSync(join(projectDir, ".git"), { recursive: true });
 
     const project = getOrCreateProject(projectDir);
 
     expect(project).not.toBeNull();
-    expect(project!.name).toBe("my-awesome-project");
+    expect(project!.name).toBe(projectName);
   });
 
   test("returns existing project on subsequent calls", () => {

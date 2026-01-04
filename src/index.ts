@@ -27,7 +27,9 @@ export const SemanthiccPlugin: Plugin = async (ctx: PluginInput) => {
   log.api.info(`Plugin started for directory: ${directory}`);
   log.api.info(`Project detected: ${project ? `id=${project.id}, name=${project.name}` : 'null'}`);
 
-  if (config.dashboard === "auto") {
+  const isTestEnv = process.env.NODE_ENV === "test" || process.env.BUN_ENV === "test" || typeof Bun !== "undefined" && Bun.env.BUN_TEST === "1";
+  
+  if (config.dashboard === "auto" && !isTestEnv) {
     const result = startDashboard(config.port || 4567, project?.id ?? null);
     log.api.info(`Dashboard started with projectId=${project?.id ?? null}`);
     if (result.port) {
