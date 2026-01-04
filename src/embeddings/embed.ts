@@ -1,6 +1,30 @@
 import { getEmbeddingModel, getEmbeddingDimensions } from "./model";
+import { embedWithGemini, getGeminiEmbeddingDimensions, type GeminiEmbeddingConfig } from "./gemini";
+import type { EmbeddingConfig } from "../config";
+
+let activeConfig: EmbeddingConfig = { provider: "local" };
+
+export function setEmbeddingConfig(config: EmbeddingConfig): void {
+  activeConfig = config;
+}
+
+export function getActiveEmbeddingDimensions(): number {
+  if (activeConfig.provider === "gemini") {
+    return getGeminiEmbeddingDimensions(activeConfig.dimensions);
+  }
+  return getEmbeddingDimensions();
+}
 
 export async function embedText(text: string): Promise<Float32Array> {
+  if (activeConfig.provider === "gemini" && activeConfig.geminiApiKey) {
+    const geminiConfig: GeminiEmbeddingConfig = {
+      apiKey: activeConfig.geminiApiKey,
+      model: activeConfig.geminiModel,
+      dimensions: activeConfig.dimensions,
+    };
+    return embedWithGemini(text, geminiConfig);
+  }
+  
   const model = await getEmbeddingModel();
   
   const output = await model(text, {

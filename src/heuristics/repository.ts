@@ -206,9 +206,8 @@ export function listMemories(
       sql += " AND project_id = ?";
     }
     params.push(projectId);
-  } else if (includeGlobal) {
-    sql += " AND project_id IS NULL";
   }
+  // When projectId is null and includeGlobal is true, show ALL memories (no filter)
 
   if (domains && domains.length > 0) {
     const placeholders = domains.map(() => "?").join(", ");

@@ -15,6 +15,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join, isAbsolute } from "node:path";
 import { loadConfig } from "./config";
 import { exec } from "node:child_process";
+import { log } from "./logger";
 
 export type * from "./types";
 
@@ -23,8 +24,12 @@ export const SemanthiccPlugin: Plugin = async (ctx: PluginInput) => {
   const project = getOrCreateProject(directory);
   const config = loadConfig(directory);
 
+  log.api.info(`Plugin started for directory: ${directory}`);
+  log.api.info(`Project detected: ${project ? `id=${project.id}, name=${project.name}` : 'null'}`);
+
   if (config.dashboard === "auto") {
     const result = startDashboard(config.port || 4567, project?.id ?? null);
+    log.api.info(`Dashboard started with projectId=${project?.id ?? null}`);
     if (result.port) {
       const url = `http://localhost:${result.port}`;
       const startCmd = process.platform === "win32" ? "start" : process.platform === "darwin" ? "open" : "xdg-open";
@@ -111,14 +116,21 @@ export const SemanthiccPlugin: Plugin = async (ctx: PluginInput) => {
 
     tool: {
       semanthicc: tool({
-        description: "Semantic code search and memory management. Actions: search, index, status, remember, forget, list, supersede, failure-fixed, promote, demote, import, export, dashboard",
+        description: `Semantic code search and memory management. Actions: search, index, status, remember, forget, list, supersede, failure-fixed, promote, demote, import, export, dashboard.
+
+SEARCH QUERY TIPS for better results:
+- Use CODE terminology, not concept names: "function that converts config" > "captain manager"
+- Describe WHAT code does: "applies tool profile to enable disable" > "tool activation"
+- Include technical terms: "async function validates JWT token" > "auth check"
+- Code queries find .ts/.js files; prose queries find docs
+- If results are mostly docs, rephrase with function/class descriptions`,
         args: {
           action: tool.schema
             .enum(["search", "index", "status", "remember", "forget", "list", "supersede", "failure-fixed", "promote", "demote", "import", "export", "dashboard"])
             .describe("Action to perform"),
           query: tool.schema
             .string()
-            .describe("Search query, content to remember, or file path for import/export")
+            .describe("Search query (use code terminology: 'function that parses X' not 'X handler'), or content to remember, or file path for import/export")
             .optional(),
           type: tool.schema
             .enum(["pattern", "decision", "constraint", "learning", "context", "rule"])

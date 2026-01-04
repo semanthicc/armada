@@ -6,6 +6,8 @@ import type { SemanthiccContext } from "../context";
 import { log } from "../logger";
 import { indexProject } from "../indexer";
 import { deleteAllEmbeddings } from "../lance/embeddings";
+import { loadConfig, loadGlobalConfig, updateGlobalEmbeddingConfig, clearConfigCache, type EmbeddingConfig } from "../config";
+import { setEmbeddingConfig } from "../embeddings/embed";
 
 function getContext(): SemanthiccContext {
   return { db: getDb() };
@@ -29,12 +31,17 @@ export async function handleRequest(
     }
 
     if (path === "/memories") {
+      log.api.debug(`GET /memories - projectId=${projectId}`);
       const memories = listMemories(ctx, {
         projectId,
         includeGlobal: true,
         limit: 100,
         conceptTypes: ["pattern", "rule", "constraint", "decision", "context", "learning"],
       });
+      log.api.debug(`Returning ${memories.length} memories`);
+      const projectCount = memories.filter((m: { project_id: number | null }) => m.project_id !== null).length;
+      const globalCount = memories.filter((m: { project_id: number | null }) => m.project_id === null).length;
+      log.api.debug(`Project: ${projectCount}, Global: ${globalCount}`);
       return Response.json(memories);
     }
 
@@ -97,8 +104,15 @@ export async function handleRequest(
       if (!projectId) {
         return Response.json({ error: "Project context required for search" }, { status: 400 });
       }
-      const results = await searchCode(ctx, query, projectId, 10);
-      return Response.json(results);
+      const fileFilter = url.searchParams.get("filter") as "code" | "docs" | "all" | null;
+      const useHybrid = url.searchParams.get("hybrid") !== "false";
+      const response = await searchCode(ctx, query, projectId, { 
+        limit: 10, 
+        fileFilter: fileFilter ?? "all",
+        useHybrid 
+      });
+      log.api.info(`Search completed: ${response.results.length} results, type=${response.searchType}, ftsIndexed=${response.ftsIndexed}`);
+      return Response.json(response);
     }
 
     if (path === "/index" && req.method === "POST") {
@@ -152,6 +166,36 @@ export async function handleRequest(
       ctx.db.prepare("DELETE FROM file_hashes WHERE project_id = ?").run(projectId);
       ctx.db.prepare("UPDATE projects SET last_indexed_at = NULL WHERE id = ?").run(projectId);
       log.api.info(`Index deleted for project ${projectId}`);
+      return Response.json({ success: true });
+    }
+
+    if (path === "/config" && req.method === "GET") {
+      let config;
+      if (projectId) {
+        const project = ctx.db.prepare("SELECT path FROM projects WHERE id = ?").get(projectId) as { path: string } | null;
+        config = project ? loadConfig(project.path) : loadGlobalConfig();
+      } else {
+        config = loadGlobalConfig();
+      }
+      const safeConfig = {
+        embedding: {
+          provider: config.embedding?.provider ?? "local",
+          geminiModel: config.embedding?.geminiModel ?? "gemini-embedding-001",
+          dimensions: config.embedding?.dimensions,
+          hasApiKey: !!config.embedding?.geminiApiKey,
+        }
+      };
+      return Response.json(safeConfig);
+    }
+
+    if (path === "/config" && req.method === "PUT") {
+      const body = await req.json() as { embedding?: EmbeddingConfig };
+      if (body.embedding) {
+        updateGlobalEmbeddingConfig(body.embedding);
+        clearConfigCache();
+        setEmbeddingConfig(body.embedding);
+        log.api.info(`Updated global embedding config`);
+      }
       return Response.json({ success: true });
     }
 

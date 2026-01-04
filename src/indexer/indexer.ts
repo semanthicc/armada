@@ -111,7 +111,7 @@ export async function indexProject(
         chunk_start: chunk.startLine,
         chunk_end: chunk.endLine,
         content: chunk.content,
-        vector: Array.from(embedding) // LanceDB takes number[] directly
+        vector: Array.from(embedding)
       });
       
       totalChunks++;

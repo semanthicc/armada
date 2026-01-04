@@ -1,4 +1,4 @@
-import type { SearchResult } from "./search";
+import type { SearchResult, SearchResponse } from "./search";
 
 export interface FormattedSearchResult {
   file: string;
@@ -27,14 +27,15 @@ export function formatSearchResults(
   });
 }
 
-export function formatSearchResultsForTool(results: SearchResult[]): string {
-  if (results.length === 0) {
+export function formatSearchResultsForTool(response: SearchResponse): string {
+  if (response.results.length === 0) {
     return "No results found.";
   }
   
-  const formatted = formatSearchResults(results);
+  const formatted = formatSearchResults(response.results);
+  const searchInfo = `[${response.searchType}${response.ftsIndexed ? " + FTS" : ""}]`;
   
-  return formatted
+  return `${searchInfo} Found ${response.results.length} results:\n\n` + formatted
     .map((r, i) => {
       return `**${i + 1}. ${r.file}** (lines ${r.lines}, ${r.similarity} match)
 \`\`\`

@@ -21,13 +21,23 @@
   let indexProgress = $state(0);
   let indexStatusText = $state('');
 
+  let embeddingConfig = $state({ provider: 'local', geminiModel: 'gemini-embedding-001', dimensions: null, hasApiKey: false });
+  let geminiApiKey = $state('');
+  let configSaving = $state(false);
+  let configMsg = $state(null);
+  let configMsgType = $state('success');
+
   let toast = $state({ visible: false, id: null });
   let filter = $state('all');
-  let filteredMemories = $derived(memories.filter(m => {
-    if (filter === 'project') return m.project_id !== null;
-    if (filter === 'global') return m.project_id === null;
-    return true;
-  }));
+  let filteredMemories = $derived.by(() => {
+    const result = memories.filter(m => {
+      if (filter === 'project') return m.project_id !== null;
+      if (filter === 'global') return m.project_id === null;
+      return true;
+    });
+    console.log('[debug] Filter:', filter, 'Filtered count:', result.length);
+    return result;
+  });
 
   async function fetchDuplicates() {
     try {
@@ -76,6 +86,58 @@
       indexMsgType = 'error';
     } finally {
       deletingIndex = false;
+    }
+  }
+
+  async function fetchConfig() {
+    try {
+      const res = await fetch('/api/config');
+      if (!res.ok) throw new Error(res.statusText);
+      const data = await res.json();
+      if (data.embedding) {
+        embeddingConfig = {
+          ...embeddingConfig,
+          ...data.embedding
+        };
+      }
+    } catch (e) {
+      console.error('Failed to fetch config', e);
+    }
+  }
+
+  async function saveConfig() {
+    configSaving = true;
+    configMsg = null;
+    try {
+      const payload = {
+        embedding: {
+          provider: embeddingConfig.provider,
+          geminiModel: embeddingConfig.geminiModel,
+          dimensions: embeddingConfig.dimensions ? Number(embeddingConfig.dimensions) : null
+        }
+      };
+
+      if (embeddingConfig.provider === 'gemini' && geminiApiKey) {
+        payload.embedding.geminiApiKey = geminiApiKey;
+      }
+
+      const res = await fetch('/api/config', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (!res.ok) throw new Error(res.statusText);
+      
+      configMsg = 'Settings saved successfully.';
+      configMsgType = 'success';
+      geminiApiKey = ''; // Clear API key from state for security
+      fetchConfig(); // Refresh to get updated hasApiKey status
+    } catch (e) {
+      configMsg = 'Failed to save settings: ' + (e instanceof Error ? e.message : String(e));
+      configMsgType = 'error';
+    } finally {
+      configSaving = false;
     }
   }
 
@@ -177,9 +239,14 @@
 
   async function fetchMemories() {
     memoriesLoading = true;
+    console.log('[debug] Fetching memories...');
     try {
       const res = await fetch('/api/memories');
       memories = await res.json();
+      console.log('[debug] Fetched memories:', memories.length, 'total');
+      console.log('[debug] Sample memory:', memories[0]);
+      console.log('[debug] Project memories:', memories.filter(m => m.project_id !== null).length);
+      console.log('[debug] Global memories:', memories.filter(m => m.project_id === null).length);
     } finally {
       memoriesLoading = false;
     }
@@ -238,6 +305,8 @@
       fetchDuplicates();
     } else if (tab === 'search') {
       searchResults = [];
+    } else if (tab === 'settings') {
+      fetchConfig();
     }
   });
 </script>
@@ -249,6 +318,7 @@
       <tab-btn class:active={tab === 'overview'} onclick={() => tab = 'overview'} role="button" tabindex="0" onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && (tab = 'overview')}>Overview</tab-btn>
       <tab-btn class:active={tab === 'memories'} onclick={() => tab = 'memories'} role="button" tabindex="0" onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && (tab = 'memories')}>Memories</tab-btn>
       <tab-btn class:active={tab === 'search'} onclick={() => tab = 'search'} role="button" tabindex="0" onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && (tab = 'search')}>Search</tab-btn>
+      <tab-btn class:active={tab === 'settings'} onclick={() => tab = 'settings'} role="button" tabindex="0" onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && (tab = 'settings')}>Settings</tab-btn>
     </nav-bar>
   </app-header>
 
@@ -430,6 +500,67 @@
               </result-item>
             {/each}
           </result-list>
+        {/if}
+      </info-card>
+    {:else if tab === 'settings'}
+      <info-card>
+        <card-title>Embedding Configuration</card-title>
+        
+        <form-field>
+          <field-label>Provider</field-label>
+          <select bind:value={embeddingConfig.provider}>
+            <option value="local">Local (MiniLM-L6-v2)</option>
+            <option value="gemini">Gemini API</option>
+          </select>
+        </form-field>
+
+        {#if embeddingConfig.provider === 'gemini'}
+          <form-field>
+            <field-label>API Key {embeddingConfig.hasApiKey ? '(Saved)' : ''}</field-label>
+            <input 
+              type="password" 
+              bind:value={geminiApiKey} 
+              placeholder={embeddingConfig.hasApiKey ? 'Enter new key to update...' : 'Enter Gemini API key...'}
+            />
+          </form-field>
+
+          <form-row>
+            <form-field>
+              <field-label>Model</field-label>
+              <select bind:value={embeddingConfig.geminiModel}>
+                <option value="gemini-embedding-001">gemini-embedding-001</option>
+                <option value="text-embedding-004">text-embedding-004</option>
+              </select>
+            </form-field>
+
+            <form-field>
+              <field-label>Dimensions (Optional)</field-label>
+              <input 
+                type="number" 
+                bind:value={embeddingConfig.dimensions} 
+                min="256" 
+                max="3072" 
+                placeholder="e.g. 768" 
+              />
+            </form-field>
+          </form-row>
+        {/if}
+
+        <modal-actions>
+          <action-btn 
+            class="primary" 
+            onclick={saveConfig} 
+            disabled={configSaving}
+            role="button" 
+            tabindex="0" 
+            onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && saveConfig()}
+          >
+            {configSaving ? 'Saving...' : 'Save Settings'}
+          </action-btn>
+        </modal-actions>
+
+        {#if configMsg}
+          <status-message type={configMsgType}>{configMsg}</status-message>
         {/if}
       </info-card>
     {/if}

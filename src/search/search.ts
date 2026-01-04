@@ -1,7 +1,7 @@
 import { getDb } from "../db";
 import type { SemanthiccContext } from "../context";
 import { embedText } from "../embeddings";
-import { searchVectors } from "../lance/embeddings";
+import { searchVectors, hybridSearch } from "../lance/embeddings";
 
 function getLegacyContext(): SemanthiccContext {
   return { db: getDb() };
@@ -16,41 +16,82 @@ export interface SearchResult {
   similarity: number;
 }
 
+export interface SearchResponse {
+  results: SearchResult[];
+  searchType: "hybrid" | "vector-only";
+  ftsIndexed: boolean;
+}
+
+export interface SearchOptions {
+  limit?: number;
+  fileFilter?: "code" | "docs" | "all";
+  useHybrid?: boolean;
+}
+
 export async function searchCode(
   ctxOrQuery: SemanthiccContext | string,
   queryOrProjectId: string | number,
-  projectIdOrLimit?: number,
-  limit?: number
-): Promise<SearchResult[]> {
+  projectIdOrOptions?: number | SearchOptions,
+  limitOrOptions?: number | SearchOptions
+): Promise<SearchResponse> {
   let ctx: SemanthiccContext;
   let query: string;
   let projectId: number;
-  let resultLimit: number;
+  let opts: SearchOptions;
 
   if (typeof ctxOrQuery === "string") {
     ctx = getLegacyContext();
     query = ctxOrQuery;
     projectId = queryOrProjectId as number;
-    resultLimit = projectIdOrLimit ?? 5;
+    opts = typeof projectIdOrOptions === "object" ? projectIdOrOptions : { limit: projectIdOrOptions };
   } else {
     ctx = ctxOrQuery;
     query = queryOrProjectId as string;
-    projectId = projectIdOrLimit!;
-    resultLimit = limit ?? 5;
+    projectId = projectIdOrOptions as number;
+    if (typeof limitOrOptions === "number") {
+      opts = { limit: limitOrOptions };
+    } else {
+      opts = limitOrOptions ?? {};
+    }
   }
+
+  const resultLimit = opts.limit ?? 5;
+  const fileFilter = opts.fileFilter ?? "all";
+  const useHybrid = opts.useHybrid ?? true;
 
   const queryEmbedding = await embedText(query);
   
-  const results = await searchVectors(projectId, Array.from(queryEmbedding), resultLimit);
+  if (useHybrid) {
+    const response = await hybridSearch(projectId, query, Array.from(queryEmbedding), resultLimit, fileFilter);
+    
+    return {
+      results: response.results.map((r, index) => ({
+        id: index,
+        filePath: r.file_path,
+        chunkStart: r.chunk_start,
+        chunkEnd: r.chunk_end,
+        content: r.content,
+        similarity: r._relevanceScore ?? r._score ?? 0,
+      })),
+      searchType: response.searchType,
+      ftsIndexed: response.ftsIndexed,
+    };
+  }
   
-  return results.map((r, index) => ({
-    id: index, // LanceDB doesn't expose internal ID easily, using index as placeholder
-    filePath: r.file_path,
-    chunkStart: r.chunk_start,
-    chunkEnd: r.chunk_end,
-    content: r.content,
-    similarity: 0, // Placeholder, LanceDB returns distance but we need to map it if available
-  }));
+  const results = await searchVectors(projectId, Array.from(queryEmbedding), resultLimit, fileFilter);
+  
+  return {
+    results: results.map((r, index) => ({
+      id: index,
+      filePath: r.file_path,
+      chunkStart: r.chunk_start,
+      chunkEnd: r.chunk_end,
+      content: r.content,
+      similarity: 0,
+    })),
+    searchType: "vector-only",
+    ftsIndexed: false,
+  };
 }
 
 export function searchByFilePattern(

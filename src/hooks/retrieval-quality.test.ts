@@ -72,12 +72,12 @@ describe("Retrieval Quality: Heuristics Injection", () => {
       expect(context).not.toContain("Other project: Use PostgreSQL");
     });
 
-    test("null project gets only global", () => {
+    test("null project gets ALL memories (global + all projects)", () => {
       const context = getHeuristicsContext(ctx, null);
       
       expect(context).toContain("Global: Always write tests");
-      expect(context).not.toContain("Use SQLite");
-      expect(context).not.toContain("Use PostgreSQL");
+      expect(context).toContain("Use SQLite");
+      expect(context).toContain("Use PostgreSQL");
     });
   });
 

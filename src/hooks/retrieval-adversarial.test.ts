@@ -121,10 +121,10 @@ describe("Adversarial Code Search (Vector)", () => {
   });
 
   test("Homonym: 'shipping' query finds 'ExpressShipping' but not 'import express'", async () => {
-    const results = await searchCode(ctx, "shipping cost calculation", 1);
+    const response = await searchCode(ctx, "shipping cost calculation", 1);
     
-    expect(results.length).toBeGreaterThan(0);
-    const topResult = results[0];
+    expect(response.results.length).toBeGreaterThan(0);
+    const topResult = response.results[0];
     if (!topResult) throw new Error("No results found");
     
     // Should favor the function over the import
@@ -132,10 +132,10 @@ describe("Adversarial Code Search (Vector)", () => {
   });
 
   test("Homonym: 'web server framework' finds 'import express'", async () => {
-    const results = await searchCode(ctx, "web server framework", 1);
+    const response = await searchCode(ctx, "web server framework", 1);
     
-    expect(results.length).toBeGreaterThan(0);
-    const topResult = results[0];
+    expect(response.results.length).toBeGreaterThan(0);
+    const topResult = response.results[0];
     if (!topResult) throw new Error("No results found");
 
     // Should favor the import/setup
