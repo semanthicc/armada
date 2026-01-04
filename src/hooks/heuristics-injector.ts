@@ -4,6 +4,7 @@ import { listMemories, HEURISTICS } from "../heuristics";
 import { findSimilarFailures } from "./similarity";
 import { extractKeywords } from "./keywords";
 import type { MemoryWithEffectiveConfidence, Memory } from "../types";
+import { INJECTABLE_CONCEPT_TYPES } from "../constants";
 
 function getLegacyContext(): SemanthiccContext {
   return { db: getDb() };
@@ -66,7 +67,7 @@ export function getHeuristicsContext(
 
   const memories = listMemories(ctx, {
     projectId,
-    conceptTypes: ["pattern", "rule", "constraint"],
+    conceptTypes: INJECTABLE_CONCEPT_TYPES,
     includeGlobal: true,
     limit: HEURISTICS.MAX_INJECTION_COUNT,
   });

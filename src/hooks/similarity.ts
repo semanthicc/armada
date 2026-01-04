@@ -47,12 +47,12 @@ export function findSimilarFailures(
     ctx = ctxOrKeywords;
     keywords = keywordsOrProjectId as string[];
     projectId = projectIdOrThreshold as number | null;
-    similarityThreshold = threshold ?? 0.3;
+    similarityThreshold = threshold ?? 0.2;
   }
 
   if (keywords.length === 0) return [];
 
-  let sql = "SELECT * FROM memories WHERE source = 'passive' AND concept_type = 'learning' AND keywords IS NOT NULL";
+  let sql = "SELECT * FROM memories WHERE source = 'passive' AND concept_type = 'learning' AND keywords IS NOT NULL AND status = 'current'";
   const params: (number | string)[] = [];
 
   if (projectId !== null) {

@@ -5,7 +5,9 @@ const STOPWORDS = new Set([
   "of", "with", "by", "from", "up", "down", "over", "is", "are", "was", "were",
   "be", "been", "being", "have", "has", "had", "do", "does", "did",
   "will", "would", "can", "could", "should", "may", "might", "must",
-  "error", "failed", "failure", "exception", "warning" 
+  "that", "this", "these", "those", "it", "its", "not", "no", "yes",
+  "when", "where", "what", "which", "who", "how", "why",
+  "error", "failed", "failure", "exception", "warning"
 ]);
 
 const DOMAIN_MAP: Record<string, string> = {

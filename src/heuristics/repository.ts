@@ -1,6 +1,7 @@
 import { getDb } from "../db";
 import type { SemanthiccContext } from "../context";
 import type { Memory, CreateMemoryInput, MemoryWithEffectiveConfidence } from "../types";
+import { INJECTABLE_CONCEPT_TYPES } from "../constants";
 import {
   HEURISTICS,
   getEffectiveConfidence,
@@ -56,7 +57,7 @@ export function deleteMemory(ctxOrId: SemanthiccContext | number, id?: number): 
 export interface ListMemoriesOptions {
   projectId?: number | null;
   domain?: string;
-  conceptTypes?: string[];
+  conceptTypes?: string[] | readonly string[];
   includeGlobal?: boolean;
   includeHistory?: boolean;
   limit?: number;
@@ -72,7 +73,7 @@ export function listMemories(
   const {
     projectId = null,
     domain,
-    conceptTypes = ["pattern", "rule", "constraint"],
+    conceptTypes = INJECTABLE_CONCEPT_TYPES,
     includeGlobal = true,
     includeHistory = false,
     limit = HEURISTICS.MAX_INJECTION_COUNT,
