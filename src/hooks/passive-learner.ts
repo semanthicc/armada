@@ -11,7 +11,7 @@ export const PASSIVE_CONFIG = {
   MIN_KEYWORDS: 4,
   MIN_CONTENT_LENGTH: 30,
   MAX_CONTENT_LENGTH: 500,
-  IGNORED_TOOLS: ["todoread", "todowrite", "task", "think"],
+  IGNORED_TOOLS: ["todoread", "todowrite", "task", "think", "read"],
 };
 
 export const TRANSIENT_PATTERNS = [

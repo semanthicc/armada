@@ -6,6 +6,11 @@ export default defineConfig({
   plugins: [svelte()],
   root: 'src/dashboard/ui',
   base: './', // Relative paths for assets
+  server: {
+    proxy: {
+      '/api': 'http://localhost:4567'
+    }
+  },
   build: {
     outDir: '../static',
     emptyOutDir: true,

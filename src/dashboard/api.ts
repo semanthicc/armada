@@ -1,5 +1,5 @@
 import { getStatus } from "../status";
-import { listMemories } from "../heuristics/repository";
+import { listMemories, deleteMemory } from "../heuristics/repository";
 import { searchCode } from "../search/search";
 import { getDb } from "../db";
 import type { SemanthiccContext } from "../context";
@@ -31,6 +31,16 @@ export async function handleRequest(
         conceptTypes: ["pattern", "rule", "constraint", "decision", "context", "learning"],
       });
       return Response.json(memories);
+    }
+
+    if (req.method === "DELETE" && path.startsWith("/memories/")) {
+      const idStr = path.split("/")[2];
+      const id = parseInt(idStr || "");
+      if (isNaN(id)) {
+        return Response.json({ error: "Invalid ID" }, { status: 400 });
+      }
+      const deleted = deleteMemory(ctx, id);
+      return Response.json({ success: deleted });
     }
 
     if (path === "/search") {

@@ -1,6 +1,6 @@
 import { serve, type Server } from "bun";
 import { handleRequest } from "./api";
-import { join } from "node:path";
+import { join, extname } from "node:path";
 import { readFileSync, existsSync } from "node:fs";
 import type { SemanthiccContext } from "../context";
 
@@ -24,8 +24,17 @@ export function startDashboard(
         return handleRequest(req, projectId, context);
       }
       
-      if (url.pathname === "/favicon.ico") {
-        return new Response(null, { status: 404 });
+      const staticPath = join(import.meta.dir, "static", url.pathname === "/" ? "index.html" : url.pathname.slice(1));
+      
+      if (existsSync(staticPath) && !url.pathname.endsWith("/")) {
+        try {
+          const content = readFileSync(staticPath);
+          const ext = extname(staticPath);
+          const type = getMimeType(ext);
+          return new Response(content, {
+            headers: { "Content-Type": type },
+          });
+        } catch {}
       }
 
       return new Response(getHtml(), {
@@ -62,4 +71,18 @@ function getHtml(): string {
       </body>
     </html>
   `;
+}
+
+function getMimeType(ext: string): string {
+  switch (ext) {
+    case ".html": return "text/html";
+    case ".js": return "text/javascript";
+    case ".css": return "text/css";
+    case ".json": return "application/json";
+    case ".png": return "image/png";
+    case ".jpg": return "image/jpeg";
+    case ".svg": return "image/svg+xml";
+    case ".ico": return "image/x-icon";
+    default: return "application/octet-stream";
+  }
 }

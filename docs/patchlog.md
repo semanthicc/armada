@@ -7,6 +7,24 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ---
 
+## [1.0.0] - 2026-01-04
+
+### Added
+- **Dashboard Actions**: Delete memories directly from the UI to clean up noise
+- **Dashboard UI**: Scope badges (Global/Project), truncated content, responsive layout
+- **API**: `DELETE /api/memories/:id` endpoint
+
+### Changed
+- **Passive Learning**: `read` tool is now ignored to prevent false positives (reading error logs)
+- **Dashboard**: Improved styling and usability
+
+### Technical
+- Updated `passive-learner.ts` config
+- Updated `App.svelte` with delete logic
+- Updated `api.ts` with delete handler
+
+---
+
 ## [0.9.0] - 2026-01-04
 
 ### Added
