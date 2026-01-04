@@ -173,13 +173,20 @@ We don't dump context. We inject precision. Every token injected must earn its p
 
 ### ADR-002: Hybrid Retrieval (BM25 + Vector)
 
-**Status**: ACCEPTED
+**Status**: EVALUATED AND SKIPPED
 
 **Context**: Pure vector search returns plausible but wrong results
 
-**Decision**: Combine keyword (BM25) + semantic (cosine) scoring
+**Decision**: ~~Combine keyword (BM25) + semantic (cosine) scoring~~ Use vector-only for MVP.
 
-**Rationale**:
+**Rationale (Updated 2026-01-04)**:
+- Vector-only search works well enough for code
+- BM25 adds complexity (tokenization, index, scoring)
+- No user complaints about search quality
+- Users have grep/glob/LSP for exact keyword matches
+- YAGNI - can add later if needed
+
+**Original Rationale**:
 - Keywords catch exact matches vector misses
 - Semantic catches meaning keyword misses
 - 80/20: covers most failure modes
@@ -544,149 +551,82 @@ Non-code domains MUST rely on explicit "remember" commands. No passive fallback 
 
 **Decision**: Respect `.gitignore` + hard-coded security/performance exclusions.
 
-**Hard Exclusion Rules (NEVER index)**:
+---
 
-```typescript
-const HARD_EXCLUDE = [
-  // === SECURITY (CRITICAL) ===
-  '.env*',              // Environment variables, secrets
-  '*.pem',              // SSL certificates
-  '*.key',              // Private keys
-  '**/credentials*',    // Credential files
-  '**/secrets*',        // Secret files
-  '**/*secret*',        // Anything with "secret" in name
-  '**/*.credential*',   // Credential files
-  
-  // === GIT ===
-  '.git/**',            // Git internals
-  
-  // === DEPENDENCIES (massive, not your code) ===
-  'node_modules/**',
-  'vendor/**',
-  'venv/**',
-  '.venv/**',
-  '__pycache__/**',
-  '.cargo/**',
-  'target/debug/**',
-  'target/release/**',
-  
-  // === BUILD OUTPUTS (generated, stale immediately) ===
-  'dist/**',
-  'build/**',
-  '.next/**',
-  'out/**',
-  'target/**',
-  '.output/**',
-  
-  // === LOCK FILES (huge, no semantic value) ===
-  'package-lock.json',
-  'yarn.lock',
-  'bun.lockb',
-  'pnpm-lock.yaml',
-  'Cargo.lock',
-  'Gemfile.lock',
-  'poetry.lock',
-  'composer.lock',
-  
-  // === IDE/EDITOR ===
-  '.idea/**',
-  '.vscode/**',
-  '*.swp',
-  '*.swo',
-  '*~',
-  
-  // === BINARY FILES (can't embed meaningfully) ===
-  '*.png', '*.jpg', '*.jpeg', '*.gif', '*.ico', '*.webp', '*.svg',
-  '*.woff', '*.woff2', '*.ttf', '*.eot', '*.otf',
-  '*.zip', '*.tar', '*.gz', '*.rar', '*.7z',
-  '*.exe', '*.dll', '*.so', '*.dylib',
-  '*.pyc', '*.pyo', '*.class', '*.o', '*.obj',
-  '*.pdf', '*.doc', '*.docx', '*.xls', '*.xlsx',
-  '*.mp3', '*.mp4', '*.wav', '*.avi', '*.mov',
-  '*.sqlite', '*.db', '*.sqlite3',
-  
-  // === GENERATED CODE (optional, can override) ===
-  '*.generated.*',
-  '*.g.dart',
-  '*.freezed.dart',
-];
-```
+### ADR-013: Exact-Match Deduplication (v0.5.0)
 
-**Additional Rules**:
+**Status**: ACCEPTED
 
-```typescript
-async function shouldIndex(filePath: string, projectRoot: string): Promise<boolean> {
-  // 1. HARD EXCLUDE (no exceptions)
-  if (matchesAny(filePath, HARD_EXCLUDE)) {
-    return false;
-  }
-  
-  // 2. RESPECT .gitignore (REQUIRED)
-  const gitignore = await loadGitignore(projectRoot);
-  if (gitignore.ignores(relativePath(filePath, projectRoot))) {
-    return false;
-  }
-  
-  // 3. BINARY CHECK (by content, not just extension)
-  if (await isBinaryFile(filePath)) {
-    return false;
-  }
-  
-  // 4. SIZE LIMIT (skip huge files)
-  const MAX_FILE_SIZE = 1_000_000; // 1MB
-  if ((await fs.stat(filePath)).size > MAX_FILE_SIZE) {
-    log.warn(`Skipping large file: ${filePath}`);
-    return false;
-  }
-  
-  // 5. EMPTY FILES
-  if ((await fs.stat(filePath)).size === 0) {
-    return false;
-  }
-  
-  return true;
-}
-```
+**Context**: Users can accidentally add the same memory multiple times ("Never use any" x10).
 
-**Rationale for Each Rule**:
+**Decision**: Reject exact-match duplicates on `addMemory()`. Do NOT use fuzzy/Jaccard matching.
 
-| Rule | Why |
-|------|-----|
-| `.env*`, secrets | **SECURITY** — Never embed credentials, API keys |
-| `.gitignore` respect | User already defined what's not relevant |
-| `node_modules/` | Millions of files, not YOUR code, changes constantly |
-| Lock files | Massive, no semantic meaning, changes every install |
-| Build outputs | Generated, stale immediately after rebuild |
-| Binary files | Can't embed text from images/executables |
-| 1MB limit | Huge files = probably generated data dumps |
-
-**Security Warning in CLI**:
-```bash
-$ semanthicc index .
-
-⚠️  SECURITY: The following are NEVER indexed:
-    - .env files, credentials, secrets, private keys
-    - Files matching .gitignore patterns
-    
-Indexing 1,234 files...
-Skipped: 45 (binary), 12 (too large), 3,456 (.gitignore)
-Done: 1,234 chunks indexed
-```
-
-**User Override (for specific cases)**:
-```bash
-# Override ONLY non-security exclusions
-$ semanthicc index . --include-generated  # Include *.generated.*
-$ semanthicc index . --include-large      # Include files > 1MB
-
-# CANNOT override security exclusions
-$ semanthicc index . --include-env        # ❌ ERROR: Security exclusions cannot be overridden
-```
+**Rationale**:
+- Exact match has zero false positives
+- Fuzzy matching risks blocking legitimate similar content ("Use React Query" vs "Use React Router")
+- If user wants to update, they can use `supersede`
+- Simple, predictable behavior
 
 **Alternatives Considered**:
-- No .gitignore respect: ❌ User knows their project best
-- Only .gitignore (no hard rules): ❌ Security risk if .gitignore missing secrets
-- Index everything, filter on retrieval: ❌ Wastes storage, secrets still stored
+- Jaccard similarity (80% threshold): ❌ False positive risk too high
+- Semantic deduplication (embeddings): ❌ Overkill, adds complexity
+- No deduplication: ❌ Allows bloat
+
+---
+
+### ADR-014: Passive Learning Noise Filtering (v0.5.0)
+
+**Status**: ACCEPTED
+
+**Context**: Passive learning captures every tool error, including transient network issues and false positives.
+
+**Decision**: Filter out transient errors and false positives using regex patterns.
+
+**Transient Patterns (ignored)**:
+- `ECONNRESET`, `ETIMEDOUT`, `ECONNREFUSED`
+- `socket hang up`, `network timeout`
+
+**False Positive Patterns (ignored)**:
+- "error handling" (talking about errors, not an error)
+- "fixed the error", "no errors" (success messages)
+
+**Additional Filters**:
+- `MIN_KEYWORDS: 4` (up from 3)
+- `MIN_CONTENT_LENGTH: 30` (skip very short errors)
+
+**Rationale**:
+- Transient network errors teach nothing
+- False positives pollute memory with non-errors
+- Higher keyword threshold ensures meaningful content
+- Inspired by ELF's false-positive detection patterns
+
+---
+
+### ADR-015: Status Command for Visibility (v0.5.0)
+
+**Status**: ACCEPTED
+
+**Context**: No visibility into system state (index freshness, memory counts, confidence distribution).
+
+**Decision**: Add `semanthicc status` action that shows:
+- Project name and path
+- Index chunk count and last indexed time
+- Memory counts by type (golden, regular, passive)
+- Confidence statistics (avg, min, max)
+
+**Rationale**:
+- Observability is essential ("can't improve what you can't measure")
+- CLI is sufficient (no dashboard needed)
+- Inspired by `git status` - clean, actionable, focused
+
+**Output Format**:
+```
+Project: my-project (/path/to/project)
+Index: 1,247 chunks | Last indexed: 2h ago ✅
+Memories: 12 total
+  ⭐ 2 golden | 8 regular | 2 passive
+  Confidence: avg 0.68 | min 0.42 | max 0.95
+```
 
 ---
 
