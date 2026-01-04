@@ -7,6 +7,21 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ---
 
+## [0.9.0] - 2026-01-04
+
+### Added
+- **Dashboard Action**: `semanthicc dashboard` launches a local web UI for visualizing memories and index status
+- **Single-File SPA**: Dashboard is a lightweight Svelte app (bundled to static HTML)
+- **API Server**: Built-in API endpoints for status, memories, and search
+
+### Technical
+- New modules: `src/dashboard/` (server, api, ui)
+- Build pipeline: Vite build integrated into `bun run build`
+- Cleanup: Auto-stop dashboard on plugin exit to prevent zombie processes
+- Tests: Server and API tests added
+
+---
+
 ## [0.8.0] - 2026-01-04
 
 ### Added

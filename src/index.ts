@@ -10,6 +10,7 @@ import { detectHistoryIntent } from "./heuristics/intent";
 import { indexProject, getIndexStats } from "./indexer";
 import { searchCode, formatSearchResultsForTool } from "./search";
 import { getStatus, formatStatus } from "./status";
+import { startDashboard, stopDashboard } from "./dashboard/server";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join, isAbsolute } from "node:path";
 
@@ -30,6 +31,9 @@ export const SemanthiccPlugin: Plugin = async (ctx: PluginInput) => {
     return learner;
   }
 
+  // Ensure dashboard server stops when plugin/process exits
+  process.on("exit", () => stopDashboard());
+  
   return {
     name: "semanthicc",
 
@@ -95,10 +99,10 @@ export const SemanthiccPlugin: Plugin = async (ctx: PluginInput) => {
 
     tool: {
       semanthicc: tool({
-        description: "Semantic code search and memory management. Actions: search, index, status, remember, forget, list, supersede, failure-fixed, promote, demote, import, export",
+        description: "Semantic code search and memory management. Actions: search, index, status, remember, forget, list, supersede, failure-fixed, promote, demote, import, export, dashboard",
         args: {
           action: tool.schema
-            .enum(["search", "index", "status", "remember", "forget", "list", "supersede", "failure-fixed", "promote", "demote", "import", "export"])
+            .enum(["search", "index", "status", "remember", "forget", "list", "supersede", "failure-fixed", "promote", "demote", "import", "export", "dashboard"])
             .describe("Action to perform"),
           query: tool.schema
             .string()
@@ -278,6 +282,13 @@ export const SemanthiccPlugin: Plugin = async (ctx: PluginInput) => {
                 return `Imported ${result.added} memories. Skipped ${result.skipped} duplicates.\nErrors:\n${result.errors.join("\n")}`;
               }
               return `Successfully imported ${result.added} memories. Skipped ${result.skipped} duplicates.`;
+            }
+
+            case "dashboard": {
+              if (query === "stop") {
+                return stopDashboard();
+              }
+              return startDashboard(4567, project?.id ?? null);
             }
 
             default:
