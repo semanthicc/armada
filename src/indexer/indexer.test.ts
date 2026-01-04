@@ -2,7 +2,7 @@ import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 import { join } from "node:path";
 import { mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { getDb, resetDb, clearAllTables } from "../db";
+import { createTestContext, type TestContext } from "../db/test-utils";
 import { shouldExclude, isCodeFile } from "./exclusions";
 import { splitIntoChunks } from "./chunker";
 import { walkProject } from "./walker";
@@ -11,10 +11,6 @@ import { indexProject, getIndexStats } from "./indexer";
 
 function getTestDir(): string {
   return join(tmpdir(), `semanthicc-indexer-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-}
-
-function getTestDbPath(): string {
-  return join(tmpdir(), `semanthicc-indexer-db-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
 }
 
 describe("Exclusions", () => {
@@ -139,12 +135,12 @@ describe("Walker", () => {
 });
 
 describe("Indexer Integration", () => {
+  let ctx: TestContext;
   let testDir: string;
-  let testDbPath: string;
 
   beforeEach(() => {
+    ctx = createTestContext();
     testDir = getTestDir();
-    testDbPath = getTestDbPath();
     
     mkdirSync(join(testDir, "src"), { recursive: true });
     writeFileSync(join(testDir, "src", "auth.ts"), `
@@ -164,20 +160,17 @@ export function formatDate(date: Date): string {
   return date.toISOString();
 }
     `.trim());
-    
-    getDb(testDbPath);
-    clearAllTables();
   });
 
   afterEach(() => {
-    resetDb();
+    ctx.cleanup();
     if (existsSync(testDir)) {
       rmSync(testDir, { recursive: true, force: true });
     }
   });
 
   test("indexes project and creates embeddings", async () => {
-    const result = await indexProject(testDir, { projectName: "Test Project" });
+    const result = await indexProject(ctx, testDir, { projectName: "Test Project" });
     
     expect(result.filesIndexed).toBe(2);
     expect(result.chunksCreated).toBeGreaterThan(0);
@@ -185,8 +178,8 @@ export function formatDate(date: Date): string {
   }, 60000);
 
   test("getIndexStats returns correct counts", async () => {
-    const result = await indexProject(testDir);
-    const stats = getIndexStats(result.projectId);
+    const result = await indexProject(ctx, testDir);
+    const stats = await getIndexStats(ctx, result.projectId);
     
     expect(stats.chunkCount).toBe(result.chunksCreated);
     expect(stats.fileCount).toBe(2);

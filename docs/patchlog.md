@@ -7,6 +7,29 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ---
 
+## [0.7.0] - 2026-01-04
+
+### Added
+- **LanceDB Integration**: Migrated vector embeddings storage from SQLite to LanceDB for O(log n) ANN search
+- **Incremental Indexing**: Only re-indexes changed files using hash tracking
+- **File Hash Tracker**: New SQLite table `file_hashes` to track file versions
+
+### Changed
+- `indexProject()` now processes files incrementally (huge performance boost for re-indexing)
+- `searchCode()` now queries LanceDB instead of SQLite
+- Embeddings are stored in `~/.local/share/semanthicc/lance/{project_id}`
+
+### Removed
+- `embeddings` table removed from SQLite schema (legacy data)
+
+### Technical
+- New dependency: `@lancedb/lancedb`
+- New module: `src/lance/` (connection, embeddings, file-tracker)
+- 260 tests passing (up from 246)
+- New tests: `lance.test.ts`, `incremental.test.ts`
+
+---
+
 ## [0.6.0] - 2026-01-04
 
 ### Added

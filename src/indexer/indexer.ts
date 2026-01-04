@@ -2,10 +2,12 @@ import { readFileSync } from "node:fs";
 import { getDb } from "../db";
 import type { SemanthiccContext } from "../context";
 import { registerProject } from "../hooks/project-detect";
-import { embedText, embeddingToBuffer } from "../embeddings";
+import { embedText } from "../embeddings";
 import { walkProject } from "./walker";
 import { splitIntoChunks } from "./chunker";
 import { hashFile } from "./hasher";
+import { upsertEmbeddings, deleteFileEmbeddings, getEmbeddingStats, type EmbeddingRecord } from "../lance/embeddings";
+import { getFileHash, updateFileHash, getAllFileHashes, deleteFileHash } from "../lance/file-tracker";
 
 function getLegacyContext(): SemanthiccContext {
   return { db: getDb() };
@@ -54,20 +56,28 @@ export async function indexProject(
   const { projectName, maxFiles = 500, onProgress } = opts;
   
   const project = registerProject(ctx, projectPath, projectName);
-  
-  ctx.db.exec(`DELETE FROM embeddings WHERE project_id = ${project.id}`);
-  
+  const existingHashes = getAllFileHashes(ctx, project.id);
   const files = walkProject(projectPath, { maxFiles });
   
-  const insertStmt = ctx.db.prepare(`
-    INSERT INTO embeddings (project_id, file_path, file_hash, chunk_index, chunk_start, chunk_end, content, embedding)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-  
   let totalChunks = 0;
+  const processedFiles = new Set<string>();
+  
+  // Process files in batches to reduce IO ops
+  let batch: EmbeddingRecord[] = [];
+  const BATCH_SIZE_CHUNKS = 100;
   
   for (let i = 0; i < files.length; i++) {
     const file = files[i]!;
+    processedFiles.add(file.relativePath);
+    
+    // Incremental check: Compare hash
+    const currentHash = hashFile(file.absolutePath);
+    const storedHash = existingHashes.get(file.relativePath);
+    
+    if (storedHash === currentHash) {
+      // File unchanged, skip re-embedding
+      continue;
+    }
     
     onProgress?.({
       totalFiles: files.length,
@@ -85,31 +95,57 @@ export async function indexProject(
     
     if (content.length > 100000) continue;
     
-    const fileHash = hashFile(file.absolutePath);
     const chunks = splitIntoChunks(content);
+    
+    // Add file chunks to batch
+    // Note: We must ensure a file's chunks are never split across batches
+    // to avoid the delete-before-insert logic deleting its own chunks.
+    // Since we add ALL chunks of this file now, we are safe as long as we flush.
     
     for (const chunk of chunks) {
       const embedding = await embedText(chunk.content);
-      const embeddingBuffer = embeddingToBuffer(embedding);
       
-      insertStmt.run(
-        project.id,
-        file.relativePath,
-        fileHash,
-        chunk.index,
-        chunk.startLine,
-        chunk.endLine,
-        chunk.content,
-        embeddingBuffer
-      );
+      batch.push({
+        file_path: file.relativePath,
+        chunk_index: chunk.index,
+        chunk_start: chunk.startLine,
+        chunk_end: chunk.endLine,
+        content: chunk.content,
+        vector: Array.from(embedding) // LanceDB takes number[] directly
+      });
       
       totalChunks++;
     }
+    
+    // Update hash record
+    updateFileHash(ctx, project.id, file.relativePath, currentHash);
+    
+    // Flush batch if large enough
+    if (batch.length >= BATCH_SIZE_CHUNKS) {
+      await upsertEmbeddings(project.id, batch);
+      batch = [];
+    }
   }
+  
+  // Flush remaining
+  if (batch.length > 0) {
+    await upsertEmbeddings(project.id, batch);
+  }
+  
+  // Handle deletions: Files in existingHashes but not in current walk
+  for (const [path, _] of existingHashes) {
+    if (!processedFiles.has(path)) {
+      await deleteFileEmbeddings(project.id, path);
+      deleteFileHash(ctx, project.id, path);
+    }
+  }
+  
+  // Update project stats
+  const stats = await getEmbeddingStats(project.id);
   
   ctx.db.exec(`
     UPDATE projects 
-    SET chunk_count = ${totalChunks}, last_indexed_at = ${Date.now()}, updated_at = ${Date.now()}
+    SET chunk_count = ${stats.chunkCount}, last_indexed_at = ${Date.now()}, updated_at = ${Date.now()}
     WHERE id = ${project.id}
   `);
   
@@ -121,31 +157,32 @@ export async function indexProject(
   };
 }
 
-export function getIndexStats(
+export async function getIndexStats(
   ctxOrProjectId: SemanthiccContext | number,
   projectId?: number
-): {
+): Promise<{
   chunkCount: number;
   fileCount: number;
   staleCount: number;
   lastIndexedAt: number | null;
-} {
+}> {
   const ctx = typeof projectId === "number" ? (ctxOrProjectId as SemanthiccContext) : getLegacyContext();
   const id = projectId ?? (ctxOrProjectId as number);
 
-  const stats = ctx.db.query(`
-    SELECT 
-      COUNT(*) as chunkCount,
-      COUNT(DISTINCT file_path) as fileCount,
-      SUM(CASE WHEN is_stale = 1 THEN 1 ELSE 0 END) as staleCount
-    FROM embeddings 
-    WHERE project_id = ?
-  `).get(id) as { chunkCount: number; fileCount: number; staleCount: number };
+  // Get chunk count from LanceDB
+  const stats = await getEmbeddingStats(id);
+  
+  // Get file count from SQLite hash tracker
+  const fileCount = ctx.db.query("SELECT COUNT(*) as count FROM file_hashes WHERE project_id = ?").get(id) as { count: number };
+  
+  // Stale count is 0 in LanceDB model as we clean up immediately
   
   const project = ctx.db.query("SELECT last_indexed_at FROM projects WHERE id = ?").get(id) as { last_indexed_at: number | null } | null;
   
   return {
-    ...stats,
+    chunkCount: stats.chunkCount,
+    fileCount: fileCount.count,
+    staleCount: 0,
     lastIndexedAt: project?.last_indexed_at ?? null,
   };
 }

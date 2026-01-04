@@ -72,7 +72,9 @@ export function resetDb(): void {
 export function clearAllTables(database?: Database): void {
   const target = database || db;
   if (!target) return;
-  target.exec("DELETE FROM embeddings");
+  // embeddings table removed in v0.7.0
+  try { target.exec("DELETE FROM embeddings"); } catch {} 
   target.exec("DELETE FROM memories"); 
   target.exec("DELETE FROM projects");
+  try { target.exec("DELETE FROM file_hashes"); } catch {}
 }

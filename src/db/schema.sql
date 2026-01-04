@@ -69,3 +69,14 @@ CREATE TABLE IF NOT EXISTS embeddings (
 CREATE INDEX IF NOT EXISTS idx_embeddings_project ON embeddings(project_id);
 CREATE INDEX IF NOT EXISTS idx_embeddings_file ON embeddings(project_id, file_path);
 CREATE INDEX IF NOT EXISTS idx_embeddings_stale ON embeddings(project_id, is_stale);
+
+CREATE TABLE IF NOT EXISTS file_hashes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  file_path TEXT NOT NULL,
+  file_hash TEXT NOT NULL,
+  last_indexed_at INTEGER DEFAULT (unixepoch('now') * 1000),
+  UNIQUE(project_id, file_path)
+);
+
+CREATE INDEX IF NOT EXISTS idx_file_hashes_project ON file_hashes(project_id);
