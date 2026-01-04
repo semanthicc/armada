@@ -4,10 +4,28 @@ import { listMemories, HEURISTICS } from "../heuristics";
 import { findSimilarFailures } from "./similarity";
 import { extractKeywords } from "./keywords";
 import type { MemoryWithEffectiveConfidence, Memory } from "../types";
-import { INJECTABLE_CONCEPT_TYPES } from "../constants";
+import { INJECTABLE_CONCEPT_TYPES, EXTENSION_DOMAIN_MAP } from "../constants";
 
 function getLegacyContext(): SemanthiccContext {
   return { db: getDb() };
+}
+
+const EXTENSION_REGEX = /\.[a-zA-Z0-9]+/g;
+
+export function detectDomains(text: string): string[] {
+  const domains = new Set<string>();
+  
+  const matches = text.match(EXTENSION_REGEX);
+  if (matches) {
+    for (const ext of matches) {
+      const domain = EXTENSION_DOMAIN_MAP[ext.toLowerCase()];
+      if (domain) {
+        domains.add(domain);
+      }
+    }
+  }
+  
+  return Array.from(domains);
 }
 
 export function formatHeuristicsForInjection(
@@ -65,8 +83,11 @@ export function getHeuristicsContext(
     query = userQuery;
   }
 
+  const domains = query ? detectDomains(query) : [];
+
   const memories = listMemories(ctx, {
     projectId,
+    domains: domains.length > 0 ? domains : undefined,
     conceptTypes: INJECTABLE_CONCEPT_TYPES,
     includeGlobal: true,
     limit: HEURISTICS.MAX_INJECTION_COUNT,

@@ -80,6 +80,7 @@ export function deleteMemory(ctxOrId: SemanthiccContext | number, id?: number): 
 export interface ListMemoriesOptions {
   projectId?: number | null;
   domain?: string;
+  domains?: string[];
   conceptTypes?: string[] | readonly string[];
   includeGlobal?: boolean;
   includeHistory?: boolean;
@@ -96,6 +97,7 @@ export function listMemories(
   const {
     projectId = null,
     domain,
+    domains,
     conceptTypes = INJECTABLE_CONCEPT_TYPES,
     includeGlobal = true,
     includeHistory = false,
@@ -123,7 +125,11 @@ export function listMemories(
     sql += " AND project_id IS NULL";
   }
 
-  if (domain) {
+  if (domains && domains.length > 0) {
+    const placeholders = domains.map(() => "?").join(", ");
+    sql += ` AND (domain IN (${placeholders}) OR domain IS NULL)`;
+    params.push(...domains);
+  } else if (domain) {
     sql += " AND domain = ?";
     params.push(domain);
   }

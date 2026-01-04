@@ -7,6 +7,36 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ---
 
+## [0.6.0] - 2026-01-04
+
+### Added
+- **Domain-Aware Injection**: Heuristics are now filtered by detected file extensions in user queries
+- **`EXTENSION_DOMAIN_MAP`**: Maps 25+ file extensions to domain names (svelte, react, typescript, python, etc.)
+- **`detectDomains()`**: Extracts domains from user messages based on file extensions mentioned
+- **Multi-domain filtering**: `listMemories()` now supports `domains?: string[]` option
+
+### Changed
+- `getHeuristicsContext()` now detects domains from query and filters heuristics accordingly
+- Domain-specific heuristics + null-domain (general) heuristics are injected together
+- Queries without file extensions get all heuristics (backward compatible)
+
+### Technical
+- New tests: 37 new tests (246 total), all passing
+- `detect-domains.test.ts`: 21 tests for domain detection
+- `domain-filter.test.ts`: 8 tests for multi-domain filtering
+- `domain-injection.test.ts`: 8 tests for end-to-end injection
+
+### How It Works
+```
+User: "Fix the Button.svelte component"
+→ detectDomains() finds ".svelte" → domain: "svelte"
+→ listMemories() filters: domain IN ('svelte') OR domain IS NULL
+→ Injects: Svelte tips + general project rules
+→ Excludes: React, Python, etc. tips
+```
+
+---
+
 ## [0.5.0] - 2026-01-04
 
 ### Added
