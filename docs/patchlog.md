@@ -7,6 +7,25 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ---
 
+## [1.7.0] - 2026-01-05
+
+### Added
+- **Focus Filtering**: Search can now filter by `focus:code`, `focus:docs`, or `focus:tests` to narrow results to specific file types
+- **Resilient Indexing**: Retry with exponential backoff (3 attempts) and circuit breaker (pauses 30s after 5 failures) prevents data loss on API errors
+- **AST-based Chunking**: Smarter code splitting using syntax tree analysis - preserves function/class context in search results
+- **Error Visibility**: Dashboard shows expandable list of failed files after indexing, with auto-sync when stale files detected
+
+### Changed
+- **Focus Boosting**: `focus:code` results now get 3x ranking boost (up from 1.5x) for more relevant matches
+
+### Fixed
+- **Critical**: Focus filters now actually work - WHERE clause was missing in search queries
+- **Silent Failures**: Indexer no longer saves file hash before embeddings succeed - prevents "ghost" entries
+- **Gemini Errors**: User-friendly error message when API blocked due to region restrictions (suggests VPN)
+- **Svelte Support**: Added svelte body delimiter in code-chunk-fork for proper AST parsing
+
+---
+
 ## [1.6.0] - 2026-01-05
 
 ### Added
