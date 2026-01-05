@@ -200,7 +200,7 @@
     indexing = true;
     indexMsg = null;
     indexProgress = 0;
-    indexStatusText = 'Starting index...';
+    indexStatusText = 'Starting scan...';
     console.log('[debug] Starting index...');
     
     try {
@@ -227,7 +227,7 @@
               
               if (data.type === 'progress') {
                 indexProgress = Math.round((data.processedFiles / data.totalFiles) * 100);
-                indexStatusText = `Indexing: ${data.processedFiles}/${data.totalFiles} files (${data.totalChunks} chunks)`;
+                indexStatusText = `Scanning: ${data.processedFiles}/${data.totalFiles} files (${data.totalChunks} chunks)`;
               } else if (data.type === 'complete') {
                 const result = data.result;
                 indexMsg = `Indexed ${result.filesIndexed} files (${result.chunksCreated} chunks) in ${(result.durationMs/1000).toFixed(1)}s`;
@@ -496,7 +496,7 @@
               tabindex="0"
               onkeydown={(e: any) => (e.key === 'Enter' || e.key === ' ') && indexProject()}
             >
-              Sync Index
+              {indexing ? 'Scanning...' : 'Sync Changes'}
             </action-btn>
 
             {#if embeddingWarning || (status.coverage && status.coverage.coveragePercent < 100)}
