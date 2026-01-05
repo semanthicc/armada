@@ -3,6 +3,7 @@ export interface Chunk {
   startLine: number;
   endLine: number;
   index: number;
+  symbol?: string;
 }
 
 const CHUNK_CONFIG = {
@@ -10,6 +11,28 @@ const CHUNK_CONFIG = {
   overlapLines: 3,
   minChunkLines: 5,
 } as const;
+
+// Simple regex patterns to extract symbol names from chunk content
+const SYMBOL_PATTERNS = [
+  /class\s+([a-zA-Z0-9_]+)/, // class MyClass
+  /function\s+([a-zA-Z0-9_]+)/, // function myFunction
+  /(?:const|let|var)\s+([a-zA-Z0-9_]+)\s*=\s*(?:async\s*)?(?:\([^)]*\)|[a-zA-Z0-9_]+)\s*=>/, // const myArrow = () =>
+  /interface\s+([a-zA-Z0-9_]+)/, // interface MyInterface
+  /type\s+([a-zA-Z0-9_]+)\s*=/, // type MyType =
+  /def\s+([a-zA-Z0-9_]+)/, // Python def my_func
+  /func\s+([a-zA-Z0-9_]+)/, // Go func myFunc
+  /struct\s+([a-zA-Z0-9_]+)/, // Rust/C struct MyStruct
+];
+
+function extractSymbol(content: string): string | undefined {
+  // Only check the first few lines of the chunk for definition
+  const lines = content.split('\n').slice(0, 5).join('\n');
+  for (const pattern of SYMBOL_PATTERNS) {
+    const match = lines.match(pattern);
+    if (match && match[1]) return match[1];
+  }
+  return undefined;
+}
 
 function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
@@ -40,6 +63,7 @@ export function splitIntoChunks(
           startLine: chunkStartLine + 1,
           endLine: i + 1,
           index: chunkIndex++,
+          symbol: extractSymbol(chunkContent),
         });
         
         const overlapStart = Math.max(0, currentChunk.length - CHUNK_CONFIG.overlapLines);

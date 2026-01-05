@@ -9,6 +9,7 @@ export interface EmbeddingRecord {
   chunk_end: number;
   content: string;
   vector: number[];
+  symbol?: string;
 }
 
 export interface HybridSearchResult extends EmbeddingRecord {
@@ -102,35 +103,14 @@ export async function searchVectors(
   }
   
   const results = await query.limit(limit).toArray();
-    
   return results as EmbeddingRecord[];
-}
-
-export async function getEmbeddingStats(projectId: number): Promise<{ chunkCount: number }> {
-  const db = await getLanceDb(projectId);
-  const tableNames = await db.tableNames();
-  
-  if (!tableNames.includes(TABLE_NAME)) return { chunkCount: 0 };
-  
-  const table = await db.openTable(TABLE_NAME);
-  const count = await table.countRows();
-  
-  return { chunkCount: count };
-}
-
-export async function deleteAllEmbeddings(projectId: number): Promise<void> {
-  const db = await getLanceDb(projectId);
-  const tableNames = await db.tableNames();
-  if (tableNames.includes(TABLE_NAME)) {
-    await db.dropTable(TABLE_NAME);
-  }
 }
 
 export async function hybridSearch(
   projectId: number,
   queryText: string,
   queryVector: number[],
-  limit: number = 10,
+  limit: number = 5,
   fileFilter?: "code" | "docs" | "all"
 ): Promise<HybridSearchResponse> {
   const db = await getLanceDb(projectId);
@@ -143,27 +123,56 @@ export async function hybridSearch(
   const table = await db.openTable(TABLE_NAME);
   
   try {
-    await createFtsIndex(table);
+    let query = (table as any).search(queryText, "hybrid");
     
-    let query = table
-      .query()
-      .nearestToText(queryText)
-      .nearestTo(queryVector)
-      .limit(limit);
-    
+    if (query.vector) {
+      query = query.vector(queryVector);
+    } else if (query.nearestTo) {
+      query = query.nearestTo(queryVector);
+    }
+      
     if (fileFilter === "code") {
       query = query.where("file_path LIKE '%.ts' OR file_path LIKE '%.tsx' OR file_path LIKE '%.js' OR file_path LIKE '%.jsx' OR file_path LIKE '%.py' OR file_path LIKE '%.go' OR file_path LIKE '%.rs'");
     } else if (fileFilter === "docs") {
       query = query.where("file_path LIKE '%.md' OR file_path LIKE '%.txt' OR file_path LIKE '%.rst'");
     }
     
-    const results = await query.toArray();
+    // Fetch more results to allow for re-ranking
+    const candidates = await query.limit(limit * 3).toArray() as HybridSearchResult[];
+    
+    // Re-rank based on file type
+    const ranked = candidates.map(r => {
+      let boost = 1.0;
+      const lowerPath = r.file_path.toLowerCase();
+      
+      const isTest = lowerPath.includes('.test.') || lowerPath.includes('.spec.') || lowerPath.includes('/tests/') || lowerPath.includes('/__tests__/');
+      const isCode = /\.(ts|tsx|js|jsx|py|go|rs|java|c|cpp|h|hpp)$/.test(lowerPath);
+      
+      if (isTest) {
+        boost = 0.8; // Down-rank tests
+      } else if (isCode) {
+        boost = 1.2; // Boost source code
+      }
+      
+      return { ...r, _boost: boost, _originalIndex: candidates.indexOf(r) };
+    });
+    
+    // Sort by boosted rank (higher is better)
+    ranked.sort((a, b) => {
+      const scoreA = (candidates.length - a._originalIndex) * a._boost;
+      const scoreB = (candidates.length - b._originalIndex) * b._boost;
+      return scoreB - scoreA;
+    });
+    
+    const results = ranked.slice(0, limit);
+
     return { 
-      results: results as HybridSearchResult[], 
+      results, 
       searchType: "hybrid", 
       ftsIndexed: true 
     };
-  } catch {
+  } catch (e) {
+    // Fallback to vector search if FTS fails
     const results = await searchVectors(projectId, queryVector, limit, fileFilter);
     return { 
       results: results as HybridSearchResult[], 
@@ -185,5 +194,25 @@ export async function ensureFtsIndex(projectId: number): Promise<boolean> {
     return true;
   } catch {
     return false;
+  }
+}
+
+export async function getEmbeddingStats(projectId: number): Promise<{ chunkCount: number }> {
+  const db = await getLanceDb(projectId);
+  const tableNames = await db.tableNames();
+  
+  if (!tableNames.includes(TABLE_NAME)) return { chunkCount: 0 };
+  
+  const table = await db.openTable(TABLE_NAME);
+  const count = await table.countRows();
+  return { chunkCount: count };
+}
+
+export async function deleteAllEmbeddings(projectId: number): Promise<void> {
+  const db = await getLanceDb(projectId);
+  const tableNames = await db.tableNames();
+  
+  if (tableNames.includes(TABLE_NAME)) {
+    await db.dropTable(TABLE_NAME);
   }
 }

@@ -1,6 +1,6 @@
 {
   "name": "opencode-semanthicc",
-  "version": "1.4.1",
+  "version": "1.6.0",
   "description": "Semantic memory and heuristics for OpenCode - least tokens, most mistake prevention",
   "module": "src/index.ts",
   "main": "src/index.ts",

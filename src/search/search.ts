@@ -3,6 +3,8 @@ import type { SemanthiccContext } from "../context";
 import { embedText, validateEmbeddingConfig, EmbeddingConfigMismatchError } from "../embeddings";
 import { searchVectors, hybridSearch } from "../lance/embeddings";
 import { loadGlobalConfig } from "../config";
+import { expandQuery } from "./synonyms";
+import { log } from "../logger";
 
 function getLegacyContext(): SemanthiccContext {
   return { db: getDb() };
@@ -67,38 +69,49 @@ export async function searchCode(
   }
 
   const queryEmbedding = await embedText(query);
+  const expandedQuery = expandQuery(query);
   
-  if (useHybrid) {
-    const response = await hybridSearch(projectId, query, Array.from(queryEmbedding), resultLimit, fileFilter);
+  const start = performance.now();
+  let resultCount = 0;
+  
+  try {
+    if (useHybrid) {
+      const response = await hybridSearch(projectId, expandedQuery, Array.from(queryEmbedding), resultLimit, fileFilter);
+      resultCount = response.results.length;
+      
+      return {
+        results: response.results.map((r, index) => ({
+          id: index,
+          filePath: r.file_path,
+          chunkStart: r.chunk_start,
+          chunkEnd: r.chunk_end,
+          content: r.content,
+          similarity: r._relevanceScore ?? r._score ?? 0,
+        })),
+        searchType: response.searchType,
+        ftsIndexed: response.ftsIndexed,
+      };
+    }
+    
+    const results = await searchVectors(projectId, Array.from(queryEmbedding), resultLimit, fileFilter);
+    resultCount = results.length;
     
     return {
-      results: response.results.map((r, index) => ({
+      results: results.map((r, index) => ({
         id: index,
         filePath: r.file_path,
         chunkStart: r.chunk_start,
         chunkEnd: r.chunk_end,
         content: r.content,
-        similarity: r._relevanceScore ?? r._score ?? 0,
+        similarity: 0,
       })),
-      searchType: response.searchType,
-      ftsIndexed: response.ftsIndexed,
+      searchType: "vector-only",
+      ftsIndexed: false,
     };
+  } finally {
+    const duration = performance.now() - start;
+    log.api.info(`Search query="${query}" took ${duration.toFixed(2)}ms (found ${resultCount} results)`);
   }
-  
-  const results = await searchVectors(projectId, Array.from(queryEmbedding), resultLimit, fileFilter);
-  
-  return {
-    results: results.map((r, index) => ({
-      id: index,
-      filePath: r.file_path,
-      chunkStart: r.chunk_start,
-      chunkEnd: r.chunk_end,
-      content: r.content,
-      similarity: 0,
-    })),
-    searchType: "vector-only",
-    ftsIndexed: false,
-  };
 }
 
 export function searchByFilePattern(

@@ -14,6 +14,8 @@ function getContext(): SemanthiccContext {
   return { db: getDb() };
 }
 
+const activeIndexers = new Map<number, AbortController>();
+
 export async function handleRequest(
   req: Request, 
   projectId: number | null,
@@ -166,26 +168,43 @@ export async function handleRequest(
         ctx.db.prepare("DELETE FROM file_hashes WHERE project_id = ?").run(projectId);
       }
 
+      // Cancel existing indexing job if any
+      if (activeIndexers.has(projectId)) {
+        log.api.info(`Cancelling existing indexing job for project ${projectId}`);
+        activeIndexers.get(projectId)!.abort();
+        activeIndexers.delete(projectId);
+      }
+
+      const controller = new AbortController();
+      activeIndexers.set(projectId, controller);
+
       const stream = new ReadableStream({
-        async start(controller) {
+        async start(controllerStream) {
           const encoder = new TextEncoder();
           const send = (data: any) => {
-            controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+            controllerStream.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
           };
 
           try {
             log.api.info(`Starting index for project ${projectId}: ${project.path}`);
             const result = await indexProject(ctx, project.path, { 
               projectName: project.name,
-              onProgress: (p) => send({ type: "progress", ...p })
+              onProgress: (p) => send({ type: "progress", ...p }),
+              signal: controller.signal
             });
             log.api.info(`Index complete: ${result.filesIndexed} files, ${result.chunksCreated} chunks`);
             send({ type: "complete", result });
           } catch (e) {
-            log.api.error(`Index failed:`, e);
-            send({ type: "error", error: e instanceof Error ? e.message : String(e) });
+            if (e instanceof Error && e.message === "Indexing aborted") {
+              log.api.info(`Indexing aborted for project ${projectId}`);
+              send({ type: "aborted" });
+            } else {
+              log.api.error(`Index failed:`, e);
+              send({ type: "error", error: e instanceof Error ? e.message : String(e) });
+            }
           } finally {
-            controller.close();
+            activeIndexers.delete(projectId);
+            controllerStream.close();
           }
         }
       });
@@ -197,6 +216,21 @@ export async function handleRequest(
           "Connection": "keep-alive",
         },
       });
+    }
+
+    if (path === "/index/stop" && req.method === "POST") {
+      if (!projectId) {
+        return Response.json({ error: "Project context required" }, { status: 400 });
+      }
+      
+      if (activeIndexers.has(projectId)) {
+        log.api.info(`Stopping indexing for project ${projectId}`);
+        activeIndexers.get(projectId)!.abort();
+        activeIndexers.delete(projectId);
+        return Response.json({ success: true, message: "Indexing aborted" });
+      }
+      
+      return Response.json({ success: false, message: "No active indexing job found" });
     }
 
     if (path === "/index" && req.method === "DELETE") {

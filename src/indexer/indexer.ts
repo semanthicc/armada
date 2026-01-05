@@ -32,6 +32,7 @@ export interface IndexOptions {
   projectName?: string;
   maxFiles?: number;
   onProgress?: (progress: IndexProgress) => void;
+  signal?: AbortSignal;
 }
 
 export async function indexProject(
@@ -54,7 +55,7 @@ export async function indexProject(
   }
 
   const startTime = Date.now();
-  const { projectName, maxFiles = 500, onProgress } = opts;
+  const { projectName, maxFiles = 500, onProgress, signal } = opts;
   
   const project = registerProject(ctx, projectPath, projectName);
   const existingHashes = getAllFileHashes(ctx, project.id);
@@ -68,6 +69,14 @@ export async function indexProject(
   const BATCH_SIZE_CHUNKS = 100;
   
   for (let i = 0; i < files.length; i++) {
+    if (signal?.aborted) {
+      // Flush any pending batch before aborting to save progress
+      if (batch.length > 0) {
+        await upsertEmbeddings(project.id, batch);
+      }
+      throw new Error("Indexing aborted");
+    }
+
     const file = files[i]!;
     processedFiles.add(file.relativePath);
     

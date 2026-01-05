@@ -7,6 +7,20 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ---
 
+## [1.6.0] - 2026-01-05
+
+### Added
+- **Abort Indexing**: New "Stop Indexing" button in Dashboard and backend support for graceful cancellation
+- **Code Boosting**: Hybrid search now prioritizes source code files (1.2x boost) over docs/tests, and down-ranks test files (0.8x)
+- **Query Expansion**: Automatically expands search queries with common coding synonyms (e.g. "login" -> "auth", "save" -> "persist")
+- **Metadata Extraction**: Regex-based extraction of function/class names during indexing for better context
+- **Performance Monitoring**: Search latency logging to help debug slow queries
+
+### Changed
+- **Search Ranking**: Improved ranking algorithm to favor implementation details for technical queries while keeping docs relevant for conceptual ones
+
+---
+
 ## [1.4.1] - 2026-01-05
 
 ### Added

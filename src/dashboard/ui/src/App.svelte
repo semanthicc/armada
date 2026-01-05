@@ -235,6 +235,11 @@
                 indexProgress = 100;
                 indexStatusText = 'Complete!';
                 fetchStatus();
+              } else if (data.type === 'aborted') {
+                indexMsg = 'Indexing aborted by user.';
+                indexMsgType = 'info';
+                indexStatusText = 'Aborted';
+                fetchStatus();
               } else if (data.type === 'error') {
                 throw new Error(data.error);
               }
@@ -246,11 +251,23 @@
       }
     } catch (e: unknown) {
       console.error(e);
-      indexMsg = 'Indexing failed: ' + (e instanceof Error ? e.message : String(e));
-      indexMsgType = 'error';
-      indexStatusText = 'Failed';
+      if (indexStatusText !== 'Aborted') {
+        indexMsg = 'Indexing failed: ' + (e instanceof Error ? e.message : String(e));
+        indexMsgType = 'error';
+        indexStatusText = 'Failed';
+      }
     } finally {
       indexing = false;
+    }
+  }
+
+  async function stopIndex() {
+    try {
+      const res = await fetch(api('/api/index/stop'), { method: 'POST' });
+      if (!res.ok) throw new Error(res.statusText);
+      indexStatusText = 'Stopping...';
+    } catch (e: unknown) {
+      console.error('Failed to stop index', e);
     }
   }
 
@@ -460,40 +477,52 @@
         </index-status>
 
         <index-actions>
-          <action-btn 
-            class="primary" 
-            onclick={indexProject} 
-            disabled={indexing || deletingIndex || (status.coverage?.coveragePercent === 100)}
-            role="button" 
-            tabindex="0"
-            onkeydown={(e: any) => (e.key === 'Enter' || e.key === ' ') && indexProject()}
-          >
-            {indexing ? 'Indexing...' : 'Sync Index'}
-          </action-btn>
+          {#if indexing}
+            <action-btn 
+              class="stop" 
+              onclick={stopIndex} 
+              role="button" 
+              tabindex="0" 
+              onkeydown={(e: any) => (e.key === 'Enter' || e.key === ' ') && stopIndex()}
+            >
+              Stop Indexing
+            </action-btn>
+          {:else}
+            <action-btn 
+              class="primary" 
+              onclick={indexProject} 
+              disabled={deletingIndex || (status.coverage?.coveragePercent === 100)}
+              role="button" 
+              tabindex="0"
+              onkeydown={(e: any) => (e.key === 'Enter' || e.key === ' ') && indexProject()}
+            >
+              Sync Index
+            </action-btn>
 
-          {#if embeddingWarning || (status.coverage && status.coverage.coveragePercent < 100)}
-          <action-btn 
-            class="force" 
-            onclick={async () => { await deleteIndex(); await indexProject(); }}
-            disabled={indexing || deletingIndex}
-            role="button" 
-            tabindex="0"
-            onkeydown={(e: any) => (e.key === 'Enter' || e.key === ' ') && (async () => { await deleteIndex(); await indexProject(); })()}
-          >
-            {indexing ? 'Reindexing...' : 'Force Reindex'}
-          </action-btn>
+            {#if embeddingWarning || (status.coverage && status.coverage.coveragePercent < 100)}
+            <action-btn 
+              class="force" 
+              onclick={async () => { await deleteIndex(); await indexProject(); }}
+              disabled={deletingIndex}
+              role="button" 
+              tabindex="0"
+              onkeydown={(e: any) => (e.key === 'Enter' || e.key === ' ') && (async () => { await deleteIndex(); await indexProject(); })()}
+            >
+              Force Reindex
+            </action-btn>
+            {/if}
+
+            <action-btn 
+              class="delete-index" 
+              onclick={deleteIndex} 
+              disabled={deletingIndex}
+              role="button" 
+              tabindex="0"
+              onkeydown={(e: any) => (e.key === 'Enter' || e.key === ' ') && deleteIndex()}
+            >
+              {deletingIndex ? 'Deleting...' : 'Delete Index'}
+            </action-btn>
           {/if}
-
-          <action-btn 
-            class="delete-index" 
-            onclick={deleteIndex} 
-            disabled={indexing || deletingIndex}
-            role="button" 
-            tabindex="0"
-            onkeydown={(e: any) => (e.key === 'Enter' || e.key === ' ') && deleteIndex()}
-          >
-            {deletingIndex ? 'Deleting...' : 'Delete Index'}
-          </action-btn>
         </index-actions>
         
         {#if indexMsg}
@@ -892,6 +921,15 @@
   
   action-btn.delete-index:hover:not([disabled]) {
     background: #ffebee;
+  }
+
+  action-btn.stop {
+    background: #f44336;
+    color: white;
+  }
+  
+  action-btn.stop:hover:not(:disabled) {
+    background: #d32f2f;
   }
 
   action-btn:disabled {
