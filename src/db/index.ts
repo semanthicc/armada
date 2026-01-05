@@ -32,6 +32,23 @@ function runSchema(database: Database): void {
   if (!hasKeywords) {
     database.exec("ALTER TABLE memories ADD COLUMN keywords TEXT");
   }
+  
+  // Migration: add embedding_config table if missing (v1.4.1)
+  const tables = database.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='embedding_config'").all();
+  if (tables.length === 0) {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS embedding_config (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id INTEGER NOT NULL UNIQUE REFERENCES projects(id) ON DELETE CASCADE,
+        provider TEXT NOT NULL CHECK(provider IN ('local', 'gemini')),
+        model TEXT NOT NULL,
+        dimensions INTEGER NOT NULL,
+        created_at INTEGER DEFAULT (unixepoch('now') * 1000),
+        updated_at INTEGER DEFAULT (unixepoch('now') * 1000)
+      );
+      CREATE INDEX IF NOT EXISTS idx_embedding_config_project ON embedding_config(project_id);
+    `);
+  }
 }
 
 export function getDb(customPath?: string): Database {

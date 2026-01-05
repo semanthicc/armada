@@ -2,7 +2,8 @@ import { readFileSync } from "node:fs";
 import { getDb } from "../db";
 import type { SemanthiccContext } from "../context";
 import { registerProject } from "../hooks/project-detect";
-import { embedText } from "../embeddings";
+import { embedText, saveEmbeddingConfig } from "../embeddings";
+import { loadGlobalConfig } from "../config";
 import { walkProject } from "./walker";
 import { splitIntoChunks } from "./chunker";
 import { hashFile } from "./hasher";
@@ -148,6 +149,9 @@ export async function indexProject(
     SET chunk_count = ${stats.chunkCount}, last_indexed_at = ${Date.now()}, updated_at = ${Date.now()}
     WHERE id = ${project.id}
   `);
+  
+  const embeddingConfig = loadGlobalConfig().embedding ?? { provider: "local" };
+  saveEmbeddingConfig(project.id, embeddingConfig);
   
   return {
     projectId: project.id,

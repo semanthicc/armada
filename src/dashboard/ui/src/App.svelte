@@ -2,6 +2,7 @@
   let status = $state(null);
   let loading = $state(true);
   let error = $state(null);
+  let embeddingWarning = $state(null);
 
   let projects = $state([]);
   let selectedProjectId = $state(null);
@@ -11,9 +12,22 @@
     return path + (path.includes('?') ? '&' : '?') + 'project_id=' + selectedProjectId;
   }
 
+  async function fetchWithRetry(url, options = {}, retries = 3, delay = 1000) {
+    for (let i = 0; i < retries; i++) {
+      try {
+        const res = await fetch(url, options);
+        if (!res.ok && res.status >= 500) throw new Error(res.statusText);
+        return res;
+      } catch (e) {
+        if (i === retries - 1) throw e;
+        await new Promise(r => setTimeout(r, delay * Math.pow(2, i)));
+      }
+    }
+  }
+
   async function fetchProjects() {
     try {
-      const res = await fetch('/api/projects');
+      const res = await fetchWithRetry('/api/projects');
       if (res.ok) projects = await res.json();
     } catch (e) {
       console.error('Failed to fetch projects', e);
@@ -125,7 +139,7 @@
 
   async function fetchConfig() {
     try {
-      const res = await fetch(api('/api/config'));
+      const res = await fetchWithRetry(api('/api/config'));
       if (!res.ok) throw new Error(res.statusText);
       const data = await res.json();
       if (data.embedding) {
@@ -261,9 +275,11 @@
 
   async function fetchStatus() {
     try {
-      const res = await fetch(api('/api/status'));
+      const res = await fetchWithRetry(api('/api/status'));
       if (!res.ok) throw new Error(res.statusText);
-      status = await res.json();
+      const data = await res.json();
+      status = data;
+      embeddingWarning = data.embeddingWarning || null;
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     } finally {
@@ -415,6 +431,18 @@
 
         <card-title>Index Management</card-title>
         
+        {#if embeddingWarning}
+          <embedding-warning>
+            <warning-icon>⚠️</warning-icon>
+            <warning-text>
+              <strong>Embedding Config Mismatch</strong><br>
+              Index: {embeddingWarning.storedProvider} ({embeddingWarning.storedDimensions} dims)<br>
+              Current: {embeddingWarning.currentProvider} ({embeddingWarning.currentDimensions} dims)<br>
+              <em>Search will fail. Force reindex required.</em>
+            </warning-text>
+          </embedding-warning>
+        {/if}
+        
         <index-status>
           <status-header>
             <status-label>Index: {status.coverage?.coveragePercent || 0}%</status-label>
@@ -438,6 +466,18 @@
           >
             {indexing ? 'Indexing...' : 'Sync Index'}
           </action-btn>
+
+          {#if embeddingWarning || status.coverage?.coveragePercent < 100}
+          <action-btn 
+            class="force" 
+            onclick={async () => { await deleteIndex(); await indexProject(); }}
+            disabled={indexing || deletingIndex}
+            role="button" 
+            tabindex="0"
+          >
+            {indexing ? 'Reindexing...' : 'Force Reindex'}
+          </action-btn>
+          {/if}
 
           <action-btn 
             class="delete-index" 
@@ -785,6 +825,40 @@
     border-radius: 4px;
     border: 1px solid #ffe0b2;
     font-weight: bold;
+  }
+
+  embedding-warning {
+    display: flex;
+    background: #ffebee;
+    border: 1px solid #ef9a9a;
+    border-radius: 6px;
+    padding: 0.75rem;
+    margin-bottom: 1rem;
+    gap: 0.5rem;
+    align-items: flex-start;
+  }
+
+  embedding-warning warning-icon {
+    font-size: 1.2rem;
+  }
+
+  embedding-warning warning-text {
+    font-size: 0.85rem;
+    color: #c62828;
+    line-height: 1.4;
+  }
+
+  embedding-warning strong {
+    color: #b71c1c;
+  }
+
+  action-btn.force {
+    background: #ff9800;
+    color: white;
+  }
+
+  action-btn.force:hover:not(:disabled) {
+    background: #f57c00;
   }
 
   progress-container.coverage {

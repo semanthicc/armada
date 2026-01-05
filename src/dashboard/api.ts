@@ -8,6 +8,7 @@ import { indexProject } from "../indexer";
 import { deleteAllEmbeddings } from "../lance/embeddings";
 import { loadConfig, loadGlobalConfig, updateGlobalEmbeddingConfig, clearConfigCache, type EmbeddingConfig } from "../config";
 import { setEmbeddingConfig } from "../embeddings/embed";
+import { deleteEmbeddingConfig, validateEmbeddingConfig, EmbeddingConfigMismatchError } from "../embeddings/config-store";
 
 function getContext(): SemanthiccContext {
   return { db: getDb() };
@@ -28,12 +29,28 @@ export async function handleRequest(
     if (path === "/status") {
       const status = getStatus(ctx, projectId);
       let coverage = null;
+      let embeddingWarning = null;
       
       if (status.projectPath && projectId) {
         coverage = await getIndexCoverage(status.projectPath, projectId);
+        
+        const globalConfig = loadGlobalConfig();
+        const currentEmbedding = globalConfig.embedding ?? { provider: "local" };
+        const mismatch = validateEmbeddingConfig(projectId, currentEmbedding);
+        if (mismatch) {
+          const error = new EmbeddingConfigMismatchError(mismatch);
+          embeddingWarning = {
+            type: "config_mismatch",
+            message: error.message,
+            storedProvider: mismatch.stored.provider,
+            storedDimensions: mismatch.stored.dimensions,
+            currentProvider: mismatch.current.provider,
+            currentDimensions: mismatch.current.dimensions,
+          };
+        }
       }
       
-      return Response.json({ ...status, coverage });
+      return Response.json({ ...status, coverage, embeddingWarning });
     }
 
     if (path === "/projects") {
@@ -140,6 +157,14 @@ export async function handleRequest(
       if (!project) {
         return Response.json({ error: "Project not found" }, { status: 404 });
       }
+      
+      const force = url.searchParams.get("force") === "true";
+      if (force) {
+        log.api.info(`Force reindex requested - clearing existing embeddings`);
+        await deleteAllEmbeddings(projectId);
+        deleteEmbeddingConfig(projectId);
+        ctx.db.prepare("DELETE FROM file_hashes WHERE project_id = ?").run(projectId);
+      }
 
       const stream = new ReadableStream({
         async start(controller) {
@@ -180,8 +205,9 @@ export async function handleRequest(
       }
       log.api.info(`Deleting index for project ${projectId}`);
       await deleteAllEmbeddings(projectId);
+      deleteEmbeddingConfig(projectId);
       ctx.db.prepare("DELETE FROM file_hashes WHERE project_id = ?").run(projectId);
-      ctx.db.prepare("UPDATE projects SET last_indexed_at = NULL WHERE id = ?").run(projectId);
+      ctx.db.prepare("UPDATE projects SET chunk_count = 0, last_indexed_at = NULL WHERE id = ?").run(projectId);
       log.api.info(`Index deleted for project ${projectId}`);
       return Response.json({ success: true });
     }

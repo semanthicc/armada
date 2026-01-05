@@ -1,6 +1,6 @@
 {
   "name": "opencode-semanthicc",
-  "version": "0.2.0",
+  "version": "1.4.1",
   "description": "Semantic memory and heuristics for OpenCode - least tokens, most mistake prevention",
   "module": "src/index.ts",
   "main": "src/index.ts",
@@ -13,12 +13,17 @@
     }
   },
   "scripts": {
-    "build": "vite build -c src/dashboard/ui/vite.config.ts && bun build src/index.ts --outdir dist --target bun --external @xenova/transformers",
+    "build": "bun run build:dashboard && bun run build:main",
+    "build:main": "bun build src/index.ts --outdir dist --target bun --external @xenova/transformers",
+    "build:dashboard": "cd src/dashboard/ui && vite build",
+    "build:all": "bun run typecheck && bun run build",
     "test": "bun test src/",
     "dev": "bun run src/index.ts",
-    "dashboard:dev": "vite dev -c src/dashboard/ui/vite.config.ts --host",
+    "dashboard:dev": "cd src/dashboard/ui && vite dev --host",
     "check": "tsc --noEmit",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "typecheck:dashboard": "cd src/dashboard/ui && svelte-check",
+    "ci": "bun run typecheck && bun run build && bun run test"
   },
   "devDependencies": {
     "@types/bun": "latest",

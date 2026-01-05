@@ -23,6 +23,7 @@ export function startDashboard(
     try {
       server = serve({
         port,
+        idleTimeout: 60,
         async fetch(req) {
           const url = new URL(req.url);
           
@@ -70,6 +71,10 @@ export function stopDashboard(): string {
     return "Dashboard stopped";
   }
   return "Dashboard not running";
+}
+
+export function getDashboardPort(): number | null {
+  return server?.port ?? null;
 }
 
 function getHtml(): string {

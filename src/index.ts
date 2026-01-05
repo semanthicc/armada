@@ -10,7 +10,7 @@ import { detectHistoryIntent } from "./heuristics/intent";
 import { indexProject, getIndexStats } from "./indexer";
 import { searchCode, formatSearchResultsForTool } from "./search";
 import { getStatus, formatStatus } from "./status";
-import { startDashboard, stopDashboard } from "./dashboard/server";
+import { startDashboard, stopDashboard, getDashboardPort } from "./dashboard/server";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join, isAbsolute } from "node:path";
 import { loadConfig } from "./config";

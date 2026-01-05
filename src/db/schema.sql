@@ -80,3 +80,15 @@ CREATE TABLE IF NOT EXISTS file_hashes (
 );
 
 CREATE INDEX IF NOT EXISTS idx_file_hashes_project ON file_hashes(project_id);
+
+CREATE TABLE IF NOT EXISTS embedding_config (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id INTEGER NOT NULL UNIQUE REFERENCES projects(id) ON DELETE CASCADE,
+  provider TEXT NOT NULL CHECK(provider IN ('local', 'gemini')),
+  model TEXT NOT NULL,
+  dimensions INTEGER NOT NULL,
+  created_at INTEGER DEFAULT (unixepoch('now') * 1000),
+  updated_at INTEGER DEFAULT (unixepoch('now') * 1000)
+);
+
+CREATE INDEX IF NOT EXISTS idx_embedding_config_project ON embedding_config(project_id);

@@ -1,7 +1,8 @@
 import { getDb } from "../db";
 import type { SemanthiccContext } from "../context";
-import { embedText } from "../embeddings";
+import { embedText, validateEmbeddingConfig, EmbeddingConfigMismatchError } from "../embeddings";
 import { searchVectors, hybridSearch } from "../lance/embeddings";
+import { loadGlobalConfig } from "../config";
 
 function getLegacyContext(): SemanthiccContext {
   return { db: getDb() };
@@ -58,6 +59,12 @@ export async function searchCode(
   const resultLimit = opts.limit ?? 5;
   const fileFilter = opts.fileFilter ?? "all";
   const useHybrid = opts.useHybrid ?? true;
+
+  const currentConfig = loadGlobalConfig().embedding ?? { provider: "local" };
+  const mismatch = validateEmbeddingConfig(projectId, currentConfig);
+  if (mismatch) {
+    throw new EmbeddingConfigMismatchError(mismatch);
+  }
 
   const queryEmbedding = await embedText(query);
   

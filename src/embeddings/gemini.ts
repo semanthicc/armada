@@ -24,7 +24,7 @@ export async function embedWithGemini(
   config: GeminiEmbeddingConfig
 ): Promise<Float32Array> {
   const ai = initClient(config);
-  const model = config.model ?? "gemini-embedding-001";
+  const model = config.model ?? "text-embedding-004";
   
   const response = await ai.models.embedContent({
     model,
@@ -55,5 +55,5 @@ export async function embedBatchWithGemini(
 }
 
 export function getGeminiEmbeddingDimensions(dimensions?: number): number {
-  return dimensions ?? 3072;
+  return dimensions ?? 768;
 }

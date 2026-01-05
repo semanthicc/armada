@@ -3,6 +3,8 @@ import type { SemanthiccContext } from "./context";
 import { walkProject } from "./indexer/walker";
 import { hashFile } from "./indexer/hasher";
 import { getAllFileHashes } from "./lance/file-tracker";
+import { getStoredEmbeddingConfig, type StoredEmbeddingConfig } from "./embeddings/config-store";
+import { getDashboardPort } from "./dashboard/server";
 
 function getLegacyContext(): SemanthiccContext {
   return { db: getDb() };
@@ -25,6 +27,7 @@ export interface TypeBreakdown {
 export interface IndexStats {
   chunkCount: number;
   lastIndexedAt: number | null;
+  embeddingConfig?: StoredEmbeddingConfig | null;
 }
 
 export interface IndexCoverage {
@@ -38,6 +41,7 @@ export interface ProjectStatus {
   projectId: number | null;
   projectName: string | null;
   projectPath: string | null;
+  dashboardPort: number | null;
   memories: MemoryStats;
   typeBreakdown: TypeBreakdown[];
   index: IndexStats | null;
@@ -73,9 +77,11 @@ export function getStatus(
     if (project) {
       projectName = project.name;
       projectPath = project.path;
+      const embeddingConfig = getStoredEmbeddingConfig(pid);
       index = {
         chunkCount: project.chunk_count,
         lastIndexedAt: project.last_indexed_at,
+        embeddingConfig,
       };
     }
   }
@@ -113,6 +119,7 @@ export function getStatus(
     projectId: pid,
     projectName,
     projectPath,
+    dashboardPort: getDashboardPort(),
     memories: {
       total: memoryStats.total || 0,
       golden: memoryStats.golden || 0,
@@ -135,12 +142,19 @@ export function formatStatus(status: ProjectStatus): string {
     lines.push("Project: Global (no project context)");
   }
 
+  if (status.dashboardPort) {
+    lines.push(`Dashboard: http://localhost:${status.dashboardPort}`);
+  }
+
   if (status.index) {
     const freshness = status.index.lastIndexedAt
       ? formatTimeSince(status.index.lastIndexedAt)
       : "never";
     const icon = status.index.lastIndexedAt && (Date.now() - status.index.lastIndexedAt < 24 * 60 * 60 * 1000) ? "✅" : "⚠️";
-    lines.push(`Index: ${status.index.chunkCount} chunks | Last indexed: ${freshness} ${icon}`);
+    const embeddingInfo = status.index.embeddingConfig 
+      ? ` | ${status.index.embeddingConfig.provider} (${status.index.embeddingConfig.dimensions} dims)`
+      : "";
+    lines.push(`Index: ${status.index.chunkCount} chunks${embeddingInfo} | Last indexed: ${freshness} ${icon}`);
   } else {
     lines.push("Index: Not indexed");
   }

@@ -4,7 +4,6 @@ import { resolve } from 'path'
 
 export default defineConfig({
   plugins: [svelte()],
-  root: 'src/dashboard/ui',
   base: './', // Relative paths for assets
   server: {
     proxy: {

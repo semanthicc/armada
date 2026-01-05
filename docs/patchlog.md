@@ -7,6 +7,50 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ---
 
+## [1.4.1] - 2026-01-05
+
+### Added
+- **Force Reindex**: Button in Dashboard and `--force` flag for `semanthicc index` to recover from embedding mismatches
+- **Embedding Safety**: Automatic detection of dimension mismatches (e.g. switching from Local to Gemini) with actionable warnings
+- **Dashboard Reliability**: Auto-retry for API calls and increased server timeouts for slow external APIs (Gemini)
+- **Settings Persistence**: Fixed issue where settings changes weren't persisting correctly across sessions
+
+### Changed
+- **Gemini Defaults**: Updated default dimensions to 768 (matches `text-embedding-004` API default) to prevent mismatch bugs
+- **Status API**: Now includes `embeddingWarning` field when config doesn't match index
+
+### Fixed
+- **Critical Bug**: Fixed crash when searching with an index created using different embedding dimensions
+- **Build**: Added `check` script and type-checking to build pipeline to prevent regression
+
+---
+
+## [1.4.0] - 2026-01-05
+
+### Added
+- **Index Coverage %**: Dashboard shows real-time index coverage percentage with progress bar
+- **Stale File Detection**: Warning badge shows "X files changed" when files need reindexing
+- **Project Switcher**: Dropdown in dashboard header to switch between indexed projects
+- **Cross-Project View**: See all indexed projects with file counts in dropdown
+- **URL Persistence**: Selected project saved in URL (`?project=123`)
+
+### Changed
+- **Sync Index Button**: Renamed from "Index Project", disabled when coverage is 100%
+- **API Status**: Now includes `coverage: { totalFiles, indexedFiles, staleFiles, coveragePercent }`
+- **API Projects**: New `/api/projects` endpoint lists all indexed projects
+
+### Fixed
+- **Test Pollution**: Tests no longer leave junk projects in database (added cleanup)
+- **Dashboard Auto-Open**: No longer opens browser during test runs
+
+### Technical
+- New function: `getIndexCoverage(projectPath, projectId)` - compares file hashes without reindexing
+- Test cleanup: `afterEach`/`afterAll` hooks delete test-created projects
+- Test env detection: Checks `NODE_ENV`, `BUN_ENV`, and `BUN_TEST` before auto-opening dashboard
+- 277 tests passing (up from 273)
+
+---
+
 ## [1.3.0] - 2026-01-05
 
 ### Added
@@ -296,6 +340,7 @@ User: "Fix the Button.svelte component"
 
 | Version | Milestone | Status |
 |---------|-----------|--------|
+| 1.4.0 | Index Coverage + Project Switcher + Test Cleanup | ✅ Complete |
 | 1.3.0 | Hybrid Search + Gemini Embeddings + Global Config | ✅ Complete |
 | 0.1.0 | MVP-1: Heuristics | ✅ Complete |
 | 0.2.0 | MVP-2: Semantic code search (MiniLM embeddings) | ✅ Complete |
