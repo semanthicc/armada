@@ -1,18 +1,24 @@
-<script>
-  let status = $state(null);
+<script lang="ts">
+  import type { 
+    Memory, SearchResult, EmbeddingConfig, StatusResponse, 
+    Project, IndexCoverage, Toast 
+  } from './types';
+
+  let status = $state<StatusResponse | null>(null);
   let loading = $state(true);
-  let error = $state(null);
-  let embeddingWarning = $state(null);
+  let error = $state<string | null>(null);
+  let embeddingWarning = $state<StatusResponse['embeddingWarning']>(null);
 
-  let projects = $state([]);
-  let selectedProjectId = $state(null);
+  let projects = $state<Project[]>([]);
+  let selectedProjectId = $state<number | null>(null);
+  let coverage = $state<IndexCoverage | null>(null);
 
-  function api(path) {
+  function api(path: string) {
     if (!selectedProjectId) return path;
     return path + (path.includes('?') ? '&' : '?') + 'project_id=' + selectedProjectId;
   }
 
-  async function fetchWithRetry(url, options = {}, retries = 3, delay = 1000) {
+  async function fetchWithRetry(url: string | URL, options: RequestInit = {}, retries = 3, delay = 1000) {
     for (let i = 0; i < retries; i++) {
       try {
         const res = await fetch(url, options);
@@ -23,11 +29,12 @@
         await new Promise(r => setTimeout(r, delay * Math.pow(2, i)));
       }
     }
+    throw new Error('Fetch failed');
   }
 
   async function fetchProjects() {
     try {
-      const res = await fetchWithRetry('/api/projects');
+      const res = await fetchWithRetry(api('/api/projects'));
       if (res.ok) projects = await res.json();
     } catch (e) {
       console.error('Failed to fetch projects', e);
@@ -35,9 +42,9 @@
   }
 
   function switchProject() {
-    const url = new URL(window.location);
+    const url = new URL(window.location.href);
     if (selectedProjectId) {
-      url.searchParams.set('project', selectedProjectId);
+      url.searchParams.set('project', String(selectedProjectId));
     } else {
       url.searchParams.delete('project');
     }
@@ -53,29 +60,30 @@
   let tab = $state('overview');
   
   let searchQuery = $state('');
-  let searchResults = $state([]);
+  let searchResults = $state<SearchResult[]>([]);
   let searchLoading = $state(false);
 
-  let memories = $state([]);
+  let memories = $state<Memory[]>([]);
   let memoriesLoading = $state(false);
 
-  let editingMemory = $state(null);
+  let editingMemory = $state<Memory | null>(null);
   let duplicatesCount = $state(0);
   
   let indexing = $state(false);
+  let forceIndexing = $state(false);
   let deletingIndex = $state(false);
-  let indexMsg = $state(null);
+  let indexMsg = $state<string | null>(null);
   let indexMsgType = $state('success');
   let indexProgress = $state(0);
   let indexStatusText = $state('');
 
-  let embeddingConfig = $state({ provider: 'local', geminiModel: 'gemini-embedding-001', dimensions: null, hasApiKey: false });
+  let embeddingConfig = $state<EmbeddingConfig>({ provider: 'local', geminiModel: 'gemini-embedding-001', dimensions: null, hasApiKey: false });
   let geminiApiKey = $state('');
   let configSaving = $state(false);
-  let configMsg = $state(null);
+  let configMsg = $state<string | null>(null);
   let configMsgType = $state('success');
 
-  let toast = $state({ visible: false, id: null });
+  let toast = $state<Toast>({ visible: false, id: null });
   let filter = $state('all');
   let filteredMemories = $derived.by(() => {
     const result = memories.filter(m => {
@@ -107,13 +115,13 @@
       alert(`Deleted ${data.deleted} duplicates.`);
       fetchMemories();
       fetchDuplicates();
-    } catch (e) {
-      alert('Failed to purge: ' + e.message);
+    } catch (e: unknown) {
+      alert('Failed to purge: ' + (e instanceof Error ? e.message : String(e)));
     }
   }
 
   async function deleteIndex() {
-    if (!confirm('Are you sure you want to delete the semantic index? This cannot be undone.')) return;
+    if (!confirm('Are you sure you want to delete the semantic index? Search will stop working until you re-index.')) return;
     
     deletingIndex = true;
     indexMsg = null;
@@ -121,14 +129,13 @@
     
     try {
       const res = await fetch(api('/api/index'), { method: 'DELETE' });
-      const data = await res.json();
       
       if (!res.ok) throw new Error(res.statusText);
       
       indexMsg = 'Index deleted successfully.';
       indexMsgType = 'success';
       fetchStatus();
-    } catch (e) {
+    } catch (e: unknown) {
       console.error(e);
       indexMsg = 'Failed to delete index: ' + (e instanceof Error ? e.message : String(e));
       indexMsgType = 'error';
@@ -157,7 +164,7 @@
     configSaving = true;
     configMsg = null;
     try {
-      const payload = {
+      const payload: any = {
         embedding: {
           provider: embeddingConfig.provider,
           geminiModel: embeddingConfig.geminiModel,
@@ -181,7 +188,7 @@
       configMsgType = 'success';
       geminiApiKey = ''; // Clear API key from state for security
       fetchConfig(); // Refresh to get updated hasApiKey status
-    } catch (e) {
+    } catch (e: unknown) {
       configMsg = 'Failed to save settings: ' + (e instanceof Error ? e.message : String(e));
       configMsgType = 'error';
     } finally {
@@ -201,7 +208,7 @@
       
       if (!res.ok) throw new Error(res.statusText);
       
-      const reader = res.body.getReader();
+      const reader = res.body!.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
       
@@ -237,7 +244,7 @@
           }
         }
       }
-    } catch (e) {
+    } catch (e: unknown) {
       console.error(e);
       indexMsg = 'Indexing failed: ' + (e instanceof Error ? e.message : String(e));
       indexMsgType = 'error';
@@ -247,7 +254,7 @@
     }
   }
 
-  function startEdit(m) {
+  function startEdit(m: Memory) {
     editingMemory = { ...m };
   }
 
@@ -268,8 +275,8 @@
       if (!res.ok) throw new Error(res.statusText);
       editingMemory = null;
       fetchMemories();
-    } catch (e) {
-      alert('Failed to save: ' + e.message);
+    } catch (e: unknown) {
+      alert('Failed to save: ' + (e instanceof Error ? e.message : String(e)));
     }
   }
 
@@ -280,7 +287,7 @@
       const data = await res.json();
       status = data;
       embeddingWarning = data.embeddingWarning || null;
-    } catch (e) {
+    } catch (e: unknown) {
       error = e instanceof Error ? e.message : String(e);
     } finally {
       loading = false;
@@ -294,9 +301,6 @@
       const res = await fetch(api('/api/memories'));
       memories = await res.json();
       console.log('[debug] Fetched memories:', memories.length, 'total');
-      console.log('[debug] Sample memory:', memories[0]);
-      console.log('[debug] Project memories:', memories.filter(m => m.project_id !== null).length);
-      console.log('[debug] Global memories:', memories.filter(m => m.project_id === null).length);
     } finally {
       memoriesLoading = false;
     }
@@ -313,7 +317,7 @@
     }
   }
 
-  async function deleteMemory(id) {
+  async function deleteMemory(id: number) {
     if (!confirm('Delete this memory?')) return;
     try {
       const res = await fetch(api(`/api/memories/${id}`), { method: 'DELETE' });
@@ -327,7 +331,7 @@
       setTimeout(() => {
         if (toast.id === data.id) toast.visible = false;
       }, 8000);
-    } catch (e) {
+    } catch (e: unknown) {
       alert(e instanceof Error ? e.message : String(e));
     }
   }
@@ -340,7 +344,7 @@
       toast.visible = false;
       fetchMemories();
       fetchStatus();
-    } catch (e) {
+    } catch (e: unknown) {
       alert('Failed to restore: ' + (e instanceof Error ? e.message : String(e)));
     }
   }
@@ -384,16 +388,16 @@
       <select bind:value={selectedProjectId} onchange={switchProject}>
         <option value={null}>Global</option>
         {#each projects as p}
-          <option value={p.id}>{p.name} ({p.indexed_files} files)</option>
+          <option value={p.id}>{p.name} ({p.chunk_count} chunks)</option>
         {/each}
       </select>
     </project-selector>
 
     <nav-bar>
-      <tab-btn class:active={tab === 'overview'} onclick={() => tab = 'overview'} role="button" tabindex="0" onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && (tab = 'overview')}>Overview</tab-btn>
-      <tab-btn class:active={tab === 'memories'} onclick={() => tab = 'memories'} role="button" tabindex="0" onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && (tab = 'memories')}>Memories</tab-btn>
-      <tab-btn class:active={tab === 'search'} onclick={() => tab = 'search'} role="button" tabindex="0" onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && (tab = 'search')}>Search</tab-btn>
-      <tab-btn class:active={tab === 'settings'} onclick={() => tab = 'settings'} role="button" tabindex="0" onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && (tab = 'settings')}>Settings</tab-btn>
+      <tab-btn class:active={tab === 'overview'} onclick={() => tab = 'overview'} role="button" tabindex="0" onkeydown={(e: any) => (e.key === 'Enter' || e.key === ' ') && (tab = 'overview')}>Overview</tab-btn>
+      <tab-btn class:active={tab === 'memories'} onclick={() => tab = 'memories'} role="button" tabindex="0" onkeydown={(e: any) => (e.key === 'Enter' || e.key === ' ') && (tab = 'memories')}>Memories</tab-btn>
+      <tab-btn class:active={tab === 'search'} onclick={() => tab = 'search'} role="button" tabindex="0" onkeydown={(e: any) => (e.key === 'Enter' || e.key === ' ') && (tab = 'search')}>Search</tab-btn>
+      <tab-btn class:active={tab === 'settings'} onclick={() => tab = 'settings'} role="button" tabindex="0" onkeydown={(e: any) => (e.key === 'Enter' || e.key === ' ') && (tab = 'settings')}>Settings</tab-btn>
     </nav-bar>
   </app-header>
 
@@ -446,7 +450,7 @@
         <index-status>
           <status-header>
             <status-label>Index: {status.coverage?.coveragePercent || 0}%</status-label>
-            {#if status.coverage?.staleFiles > 0}
+            {#if status.coverage && status.coverage.staleFiles > 0}
               <warning-badge>{status.coverage.staleFiles} files changed</warning-badge>
             {/if}
           </status-header>
@@ -459,21 +463,22 @@
           <action-btn 
             class="primary" 
             onclick={indexProject} 
-            disabled={indexing || deletingIndex || status.coverage?.coveragePercent === 100}
+            disabled={indexing || deletingIndex || (status.coverage?.coveragePercent === 100)}
             role="button" 
             tabindex="0"
-            onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && indexProject()}
+            onkeydown={(e: any) => (e.key === 'Enter' || e.key === ' ') && indexProject()}
           >
             {indexing ? 'Indexing...' : 'Sync Index'}
           </action-btn>
 
-          {#if embeddingWarning || status.coverage?.coveragePercent < 100}
+          {#if embeddingWarning || (status.coverage && status.coverage.coveragePercent < 100)}
           <action-btn 
             class="force" 
             onclick={async () => { await deleteIndex(); await indexProject(); }}
             disabled={indexing || deletingIndex}
             role="button" 
             tabindex="0"
+            onkeydown={(e: any) => (e.key === 'Enter' || e.key === ' ') && (async () => { await deleteIndex(); await indexProject(); })()}
           >
             {indexing ? 'Reindexing...' : 'Force Reindex'}
           </action-btn>
@@ -485,7 +490,7 @@
             disabled={indexing || deletingIndex}
             role="button" 
             tabindex="0"
-            onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && deleteIndex()}
+            onkeydown={(e: any) => (e.key === 'Enter' || e.key === ' ') && deleteIndex()}
           >
             {deletingIndex ? 'Deleting...' : 'Delete Index'}
           </action-btn>
@@ -507,12 +512,12 @@
         <mem-header>
           <card-title>Memories</card-title>
           <filter-group>
-            <filter-btn class:active={filter === 'all'} onclick={() => filter = 'all'} role="button" tabindex="0" onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && (filter = 'all')}>All</filter-btn>
-            <filter-btn class:active={filter === 'project'} onclick={() => filter = 'project'} role="button" tabindex="0" onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && (filter = 'project')}>Project Only</filter-btn>
-            <filter-btn class:active={filter === 'global'} onclick={() => filter = 'global'} role="button" tabindex="0" onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && (filter = 'global')}>Global Only</filter-btn>
+            <filter-btn class:active={filter === 'all'} onclick={() => filter = 'all'} role="button" tabindex="0" onkeydown={(e: any) => (e.key === 'Enter' || e.key === ' ') && (filter = 'all')}>All</filter-btn>
+            <filter-btn class:active={filter === 'project'} onclick={() => filter = 'project'} role="button" tabindex="0" onkeydown={(e: any) => (e.key === 'Enter' || e.key === ' ') && (filter = 'project')}>Project Only</filter-btn>
+            <filter-btn class:active={filter === 'global'} onclick={() => filter = 'global'} role="button" tabindex="0" onkeydown={(e: any) => (e.key === 'Enter' || e.key === ' ') && (filter = 'global')}>Global Only</filter-btn>
           </filter-group>
           {#if duplicatesCount > 0}
-            <action-btn class="purge" onclick={purgeDuplicates} role="button" tabindex="0" onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && purgeDuplicates()}>
+            <action-btn class="purge" onclick={purgeDuplicates} role="button" tabindex="0" onkeydown={(e: any) => (e.key === 'Enter' || e.key === ' ') && purgeDuplicates()}>
               Purge Duplicates ({duplicatesCount})
             </action-btn>
           {/if}
@@ -530,8 +535,8 @@
                 <mem-content title={m.content}>{m.content}</mem-content>
                 <mem-conf>{m.confidence.toFixed(2)}</mem-conf>
                 <mem-actions>
-                  <action-btn class="edit" onclick={() => startEdit(m)} aria-label="Edit" role="button" tabindex="0" onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && startEdit(m)}>✏️</action-btn>
-                  <action-btn class="delete" onclick={() => deleteMemory(m.id)} aria-label="Delete" role="button" tabindex="0" onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && deleteMemory(m.id)}>×</action-btn>
+                  <action-btn class="edit" onclick={() => startEdit(m)} aria-label="Edit" role="button" tabindex="0" onkeydown={(e: any) => (e.key === 'Enter' || e.key === ' ') && startEdit(m)}>✏️</action-btn>
+                  <action-btn class="delete" onclick={() => deleteMemory(m.id)} aria-label="Delete" role="button" tabindex="0" onkeydown={(e: any) => (e.key === 'Enter' || e.key === ' ') && deleteMemory(m.id)}>×</action-btn>
                 </mem-actions>
               </mem-item>
             {/each}
@@ -542,11 +547,11 @@
       {#if editingMemory}
         <modal-layer 
           onclick={() => editingMemory = null}
-          onkeydown={(e) => e.key === 'Escape' && (editingMemory = null)}
+          onkeydown={(e: any) => e.key === 'Escape' && (editingMemory = null)}
           role="presentation"
           tabindex="-1"
         >
-          <modal-panel onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()} role="dialog" aria-modal="true" tabindex="-1">
+          <modal-panel onclick={(e: any) => e.stopPropagation()} onkeydown={(e: any) => e.stopPropagation()} role="dialog" aria-modal="true" tabindex="-1">
             <card-title>Edit Memory #{editingMemory.id}</card-title>
             
             <form-field>
@@ -579,8 +584,8 @@
             </form-row>
 
             <modal-actions>
-              <action-btn onclick={() => editingMemory = null} role="button" tabindex="0" onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && (editingMemory = null)}>Cancel</action-btn>
-              <action-btn class="primary" onclick={saveEdit} role="button" tabindex="0" onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && saveEdit()}>Save</action-btn>
+              <action-btn onclick={() => editingMemory = null} role="button" tabindex="0" onkeydown={(e: any) => (e.key === 'Enter' || e.key === ' ') && (editingMemory = null)}>Cancel</action-btn>
+              <action-btn class="primary" onclick={saveEdit} role="button" tabindex="0" onkeydown={(e: any) => (e.key === 'Enter' || e.key === ' ') && saveEdit()}>Save</action-btn>
             </modal-actions>
           </modal-panel>
         </modal-layer>
@@ -593,9 +598,9 @@
             type="text" 
             bind:value={searchQuery} 
             placeholder="Search code..." 
-            onkeydown={(e) => e.key === 'Enter' && runSearch()}
+            onkeydown={(e: any) => e.key === 'Enter' && runSearch()}
           />
-          <action-btn onclick={runSearch} disabled={searchLoading} role="button" tabindex="0" onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && runSearch()}>Search</action-btn>
+          <action-btn onclick={runSearch} disabled={searchLoading} role="button" tabindex="0" onkeydown={(e: any) => (e.key === 'Enter' || e.key === ' ') && runSearch()}>Search</action-btn>
         </search-box>
 
         {#if searchLoading}
@@ -665,7 +670,7 @@
             disabled={configSaving}
             role="button" 
             tabindex="0" 
-            onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && saveConfig()}
+            onkeydown={(e: any) => (e.key === 'Enter' || e.key === ' ') && saveConfig()}
           >
             {configSaving ? 'Saving...' : 'Save Settings'}
           </action-btn>
@@ -681,7 +686,7 @@
   {#if toast.visible}
     <toast-notification>
       <span>Memory deleted.</span>
-      <action-btn class="undo" onclick={undoDelete} role="button" tabindex="0" onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && undoDelete()}>Undo</action-btn>
+      <action-btn class="undo" onclick={undoDelete} role="button" tabindex="0" onkeydown={(e: any) => (e.key === 'Enter' || e.key === ' ') && undoDelete()}>Undo</action-btn>
     </toast-notification>
   {/if}
 </app-shell>

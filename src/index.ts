@@ -14,6 +14,7 @@ import { startDashboard, stopDashboard, getDashboardPort } from "./dashboard/ser
 import { readFileSync, writeFileSync } from "node:fs";
 import { join, isAbsolute } from "node:path";
 import { loadConfig } from "./config";
+import { setEmbeddingConfig } from "./embeddings/embed";
 import { exec } from "node:child_process";
 import { log } from "./logger";
 
@@ -23,6 +24,11 @@ export const SemanthiccPlugin: Plugin = async (ctx: PluginInput) => {
   const { directory } = ctx;
   const project = getOrCreateProject(directory);
   const config = loadConfig(directory);
+
+  if (config.embedding) {
+    setEmbeddingConfig(config.embedding);
+    log.api.info(`Initialized embedding config: ${config.embedding.provider}`);
+  }
 
   log.api.info(`Plugin started for directory: ${directory}`);
   log.api.info(`Project detected: ${project ? `id=${project.id}, name=${project.name}` : 'null'}`);

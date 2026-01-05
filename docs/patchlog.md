@@ -22,6 +22,8 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 ### Fixed
 - **Critical Bug**: Fixed crash when searching with an index created using different embedding dimensions
 - **Build**: Added `check` script and type-checking to build pipeline to prevent regression
+- **Config Persistence**: Fixed bug where embedding config wasn't initialized on startup in dev mode
+- **Type Safety**: Added strict TypeScript checking for Dashboard UI (`svelte-check` clean)
 
 ---
 
