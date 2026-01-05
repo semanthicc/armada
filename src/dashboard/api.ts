@@ -142,7 +142,7 @@ export async function handleRequest(
       }
       const fileFilter = url.searchParams.get("filter") as "code" | "docs" | "all" | null;
       const useHybrid = url.searchParams.get("hybrid") !== "false";
-      const response = await searchCode(ctx, query, projectId, { 
+      const response = await searchCode(query, projectId, { 
         limit: 10, 
         fileFilter: fileFilter ?? "all",
         useHybrid 

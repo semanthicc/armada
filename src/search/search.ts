@@ -32,35 +32,16 @@ export interface SearchOptions {
 }
 
 export async function searchCode(
-  ctxOrQuery: SemanthiccContext | string,
-  queryOrProjectId: string | number,
-  projectIdOrOptions?: number | SearchOptions,
-  limitOrOptions?: number | SearchOptions
+  query: string, 
+  projectId: number, 
+  limit: number | { limit?: number; fileFilter?: "code" | "docs" | "all"; focus?: "code" | "docs" | "tests" | "mixed"; useHybrid?: boolean } = 5, 
+  fileFilter?: "code" | "docs" | "all",
+  focus?: "code" | "docs" | "tests" | "mixed"
 ): Promise<SearchResponse> {
-  let ctx: SemanthiccContext;
-  let query: string;
-  let projectId: number;
-  let opts: SearchOptions;
-
-  if (typeof ctxOrQuery === "string") {
-    ctx = getLegacyContext();
-    query = ctxOrQuery;
-    projectId = queryOrProjectId as number;
-    opts = typeof projectIdOrOptions === "object" ? projectIdOrOptions : { limit: projectIdOrOptions };
-  } else {
-    ctx = ctxOrQuery;
-    query = queryOrProjectId as string;
-    projectId = projectIdOrOptions as number;
-    if (typeof limitOrOptions === "number") {
-      opts = { limit: limitOrOptions };
-    } else {
-      opts = limitOrOptions ?? {};
-    }
-  }
-
+  const opts = typeof limit === "object" ? limit : { limit, fileFilter, focus };
   const resultLimit = opts.limit ?? 5;
-  const fileFilter = opts.fileFilter ?? "all";
   const useHybrid = opts.useHybrid ?? true;
+  const searchFocus = opts.focus ?? focus;
 
   const currentConfig = loadGlobalConfig().embedding ?? { provider: "local" };
   const mismatch = validateEmbeddingConfig(projectId, currentConfig);
@@ -76,7 +57,14 @@ export async function searchCode(
   
   try {
     if (useHybrid) {
-      const response = await hybridSearch(projectId, expandedQuery, Array.from(queryEmbedding), resultLimit, fileFilter);
+      const response = await hybridSearch(
+        projectId, 
+        expandedQuery, 
+        Array.from(queryEmbedding), 
+        resultLimit, 
+        opts.fileFilter,
+        searchFocus
+      );
       resultCount = response.results.length;
       
       return {
@@ -93,7 +81,13 @@ export async function searchCode(
       };
     }
     
-    const results = await searchVectors(projectId, Array.from(queryEmbedding), resultLimit, fileFilter);
+    const results = await searchVectors(
+      projectId, 
+      Array.from(queryEmbedding), 
+      resultLimit, 
+      opts.fileFilter,
+      searchFocus
+    );
     resultCount = results.length;
     
     return {
@@ -113,6 +107,7 @@ export async function searchCode(
     log.api.info(`Search query="${query}" took ${duration.toFixed(2)}ms (found ${resultCount} results)`);
   }
 }
+
 
 export function searchByFilePattern(
   ctxOrProjectId: SemanthiccContext | number,

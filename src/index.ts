@@ -168,9 +168,13 @@ SEARCH QUERY TIPS for better results:
             .boolean()
             .describe("Force action (e.g. promote without domain)")
             .optional(),
+          focus: tool.schema
+            .enum(["code", "docs", "tests", "mixed"])
+            .describe("Search focus: 'code' filters to source files (use technical/code-style queries like function names, not natural language), 'docs' filters to markdown, 'tests' filters to spec files, 'mixed' searches all")
+            .optional(),
         },
         async execute(args) {
-          const { action, query, type, domain, global: isGlobal, id, limit = 5, includeHistory, force } = args;
+          const { action, query, type, domain, global: isGlobal, id, limit = 5, includeHistory, force, focus } = args;
           const project = getOrCreateProject(directory);
 
           switch (action) {
@@ -185,7 +189,7 @@ SEARCH QUERY TIPS for better results:
               if (stats.chunkCount === 0) {
                 return "Error: Project not indexed. Run 'index' action first.";
               }
-              const results = await searchCode(query, project.id, limit);
+              const results = await searchCode(query, project.id, { limit, focus });
               return formatSearchResultsForTool(results);
             }
 

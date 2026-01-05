@@ -6,9 +6,103 @@ import { embedText, saveEmbeddingConfig } from "../embeddings";
 import { loadGlobalConfig } from "../config";
 import { walkProject } from "./walker";
 import { splitIntoChunks } from "./chunker";
+import { splitIntoAstChunks, isAstChunkable, isAstChunk } from "./ast-chunker";
 import { hashFile } from "./hasher";
 import { upsertEmbeddings, deleteFileEmbeddings, getEmbeddingStats, type EmbeddingRecord } from "../lance/embeddings";
 import { getFileHash, updateFileHash, getAllFileHashes, deleteFileHash } from "../lance/file-tracker";
+
+const MAX_RETRIES = 3;
+const RETRY_DELAY_MS = 1000;
+const CIRCUIT_BREAKER_THRESHOLD = 5;
+const CIRCUIT_BREAKER_RESET_MS = 30000;
+
+class CircuitBreaker {
+  private consecutiveFailures = 0;
+  private openUntil = 0;
+  private sleeper: (ms: number) => Promise<void>;
+
+  constructor(sleeper?: (ms: number) => Promise<void>) {
+    this.sleeper = sleeper || ((ms) => new Promise(resolve => setTimeout(resolve, ms)));
+  }
+
+  async execute<T>(fn: () => Promise<T>): Promise<T> {
+    if (Date.now() < this.openUntil) {
+      const waitTime = this.openUntil - Date.now();
+      console.log(`[circuit-breaker] Open, waiting ${Math.ceil(waitTime / 1000)}s before retry`);
+      await this.sleeper(waitTime);
+    }
+
+    try {
+      const result = await fn();
+      this.consecutiveFailures = 0;
+      return result;
+    } catch (error) {
+      this.consecutiveFailures++;
+      
+      if (this.consecutiveFailures >= CIRCUIT_BREAKER_THRESHOLD) {
+        this.openUntil = Date.now() + CIRCUIT_BREAKER_RESET_MS;
+        console.log(`[circuit-breaker] Opened after ${this.consecutiveFailures} failures, pausing for 30s`);
+        this.consecutiveFailures = 0;
+      }
+      
+      throw error;
+    }
+  }
+
+  reset() {
+    this.consecutiveFailures = 0;
+    this.openUntil = 0;
+  }
+  
+  // For testing only - replace sleeper dynamically
+  setSleeper(sleeper: (ms: number) => Promise<void>) {
+    this.sleeper = sleeper;
+  }
+}
+
+const embeddingCircuitBreaker = new CircuitBreaker();
+
+export function resetCircuitBreaker() {
+  embeddingCircuitBreaker.reset();
+  embeddingCircuitBreaker.setSleeper((ms) => new Promise(resolve => setTimeout(resolve, ms)));
+  retrySleeper = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+}
+
+let retrySleeper: (ms: number) => Promise<void> = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+export function setCircuitBreakerTestMode(enabled: boolean) {
+  if (enabled) {
+    embeddingCircuitBreaker.setSleeper(() => Promise.resolve());
+    retrySleeper = () => Promise.resolve();
+  } else {
+    embeddingCircuitBreaker.setSleeper((ms) => new Promise(resolve => setTimeout(resolve, ms)));
+    retrySleeper = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+  }
+}
+
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  retries = MAX_RETRIES,
+  delayMs = RETRY_DELAY_MS
+): Promise<T> {
+  let lastError: Error | null = null;
+  
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await embeddingCircuitBreaker.execute(fn);
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      
+      if (attempt < retries) {
+        const jitter = 1 + Math.random() * 0.3;
+        const delay = delayMs * Math.pow(2, attempt) * jitter;
+        await retrySleeper(delay);
+      }
+    }
+  }
+  
+  throw lastError;
+}
 
 function getLegacyContext(): SemanthiccContext {
   return { db: getDb() };
@@ -26,6 +120,8 @@ export interface IndexResult {
   filesIndexed: number;
   chunksCreated: number;
   durationMs: number;
+  errorCount?: number;
+  errors?: Array<{ file: string; error: string }>;
 }
 
 export interface IndexOptions {
@@ -63,16 +159,24 @@ export async function indexProject(
   
   let totalChunks = 0;
   const processedFiles = new Set<string>();
+  const errors: Array<{ file: string; error: string }> = [];
   
-  // Process files in batches to reduce IO ops
+  // Track files in current batch for transactional hash updates
   let batch: EmbeddingRecord[] = [];
+  let batchFileHashes: Map<string, string> = new Map();
   const BATCH_SIZE_CHUNKS = 100;
   
   for (let i = 0; i < files.length; i++) {
     if (signal?.aborted) {
-      // Flush any pending batch before aborting to save progress
       if (batch.length > 0) {
-        await upsertEmbeddings(project.id, batch);
+        try {
+          await upsertEmbeddings(project.id, batch);
+          for (const [path, hash] of batchFileHashes) {
+            updateFileHash(ctx, project.id, path, hash);
+          }
+        } catch (e) {
+          // Best effort on abort
+        }
       }
       throw new Error("Indexing aborted");
     }
@@ -80,12 +184,10 @@ export async function indexProject(
     const file = files[i]!;
     processedFiles.add(file.relativePath);
     
-    // Incremental check: Compare hash
     const currentHash = hashFile(file.absolutePath);
     const storedHash = existingHashes.get(file.relativePath);
     
     if (storedHash === currentHash) {
-      // File unchanged, skip re-embedding
       continue;
     }
     
@@ -105,44 +207,73 @@ export async function indexProject(
     
     if (content.length > 100000) continue;
     
-    const chunks = splitIntoChunks(content);
+    let astChunks = null;
+    if (isAstChunkable(file.relativePath)) {
+      astChunks = await splitIntoAstChunks(file.absolutePath, content);
+    }
     
-    // Add file chunks to batch
-    // Note: We must ensure a file's chunks are never split across batches
-    // to avoid the delete-before-insert logic deleting its own chunks.
-    // Since we add ALL chunks of this file now, we are safe as long as we flush.
+    const chunks = astChunks ?? splitIntoChunks(content);
+    let fileSuccess = true;
     
     for (const chunk of chunks) {
-      const embedding = await embedText(chunk.content);
+      const textForEmbedding = isAstChunk(chunk) ? chunk.contextualizedText : chunk.content;
+      
+      let embedding: Float32Array;
+      try {
+        embedding = await withRetry(() => embedText(textForEmbedding));
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        errors.push({ file: file.relativePath, error: errorMsg });
+        fileSuccess = false;
+        break;
+      }
       
       batch.push({
-        file_path: file.relativePath,
+        file_path: file.relativePath.replace(/\\/g, '/'),
         chunk_index: chunk.index,
         chunk_start: chunk.startLine,
         chunk_end: chunk.endLine,
         content: chunk.content,
-        vector: Array.from(embedding)
+        vector: Array.from(embedding),
+        symbol: chunk.symbol,
+        scope_chain: isAstChunk(chunk) ? chunk.scopeChain : undefined,
+        contextualized_content: isAstChunk(chunk) ? chunk.contextualizedText : undefined,
       });
       
       totalChunks++;
     }
     
-    // Update hash record
-    updateFileHash(ctx, project.id, file.relativePath, currentHash);
+    if (fileSuccess) {
+      batchFileHashes.set(file.relativePath, currentHash);
+    }
     
-    // Flush batch if large enough
     if (batch.length >= BATCH_SIZE_CHUNKS) {
-      await upsertEmbeddings(project.id, batch);
+      try {
+        await upsertEmbeddings(project.id, batch);
+        for (const [path, hash] of batchFileHashes) {
+          updateFileHash(ctx, project.id, path, hash);
+        }
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        errors.push({ file: "batch_upsert", error: errorMsg });
+      }
       batch = [];
+      batchFileHashes = new Map();
     }
   }
   
-  // Flush remaining
   if (batch.length > 0) {
-    await upsertEmbeddings(project.id, batch);
+    try {
+      await upsertEmbeddings(project.id, batch);
+      for (const [path, hash] of batchFileHashes) {
+        updateFileHash(ctx, project.id, path, hash);
+      }
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      errors.push({ file: "batch_upsert", error: errorMsg });
+    }
   }
   
-  // Handle deletions: Files in existingHashes but not in current walk
   for (const [path, _] of existingHashes) {
     if (!processedFiles.has(path)) {
       await deleteFileEmbeddings(project.id, path);
@@ -150,7 +281,6 @@ export async function indexProject(
     }
   }
   
-  // Update project stats
   const stats = await getEmbeddingStats(project.id);
   
   ctx.db.exec(`
@@ -167,6 +297,8 @@ export async function indexProject(
     filesIndexed: files.length,
     chunksCreated: totalChunks,
     durationMs: Date.now() - startTime,
+    errorCount: errors.length,
+    errors: errors.length > 0 ? errors : undefined,
   };
 }
 

@@ -4,6 +4,13 @@ import type { EmbeddingConfig } from "../config";
 
 let activeConfig: EmbeddingConfig = { provider: "local" };
 
+type EmbedFunction = (text: string) => Promise<Float32Array>;
+let testEmbedder: EmbedFunction | null = null;
+
+export function setTestEmbedder(embedder: EmbedFunction | null): void {
+  testEmbedder = embedder;
+}
+
 export function setEmbeddingConfig(config: EmbeddingConfig): void {
   activeConfig = config;
 }
@@ -16,6 +23,10 @@ export function getActiveEmbeddingDimensions(): number {
 }
 
 export async function embedText(text: string): Promise<Float32Array> {
+  if (testEmbedder) {
+    return testEmbedder(text);
+  }
+  
   if (activeConfig.provider === "gemini" && activeConfig.geminiApiKey) {
     const geminiConfig: GeminiEmbeddingConfig = {
       apiKey: activeConfig.geminiApiKey,

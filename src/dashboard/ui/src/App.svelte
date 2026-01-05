@@ -76,6 +76,8 @@
   let indexMsgType = $state('success');
   let indexProgress = $state(0);
   let indexStatusText = $state('');
+  let indexErrors = $state<Array<{file: string, error: string}>>([]);
+  let showErrors = $state(false);
 
   let embeddingConfig = $state<EmbeddingConfig>({ provider: 'local', geminiModel: 'gemini-embedding-001', dimensions: null, hasApiKey: false });
   let geminiApiKey = $state('');
@@ -230,8 +232,16 @@
                 indexStatusText = `Scanning: ${data.processedFiles}/${data.totalFiles} files (${data.totalChunks} chunks)`;
               } else if (data.type === 'complete') {
                 const result = data.result;
-                indexMsg = `Indexed ${result.filesIndexed} files (${result.chunksCreated} chunks) in ${(result.durationMs/1000).toFixed(1)}s`;
-                indexMsgType = 'success';
+                if (result.errorCount && result.errorCount > 0) {
+                  indexMsg = `Indexed ${result.filesIndexed} files (${result.chunksCreated} chunks) with ${result.errorCount} errors.`;
+                  indexMsgType = 'warning';
+                  indexErrors = result.errors || [];
+                  showErrors = false;
+                } else {
+                  indexMsg = `Indexed ${result.filesIndexed} files (${result.chunksCreated} chunks) in ${(result.durationMs/1000).toFixed(1)}s`;
+                  indexMsgType = 'success';
+                  indexErrors = [];
+                }
                 indexProgress = 100;
                 indexStatusText = 'Complete!';
                 fetchStatus();
@@ -297,6 +307,8 @@
     }
   }
 
+  let autoIndexTriggered = $state(false);
+  
   async function fetchStatus() {
     try {
       const res = await fetchWithRetry(api('/api/status'));
@@ -304,6 +316,14 @@
       const data = await res.json();
       status = data;
       embeddingWarning = data.embeddingWarning || null;
+      
+      if (data.coverage?.staleFiles > 0 && !indexing && !embeddingWarning && !autoIndexTriggered) {
+        console.log(`[auto-index] Detected ${data.coverage.staleFiles} stale files, triggering sync`);
+        autoIndexTriggered = true;
+        indexProject();
+      } else if (data.coverage?.staleFiles === 0) {
+        autoIndexTriggered = false;
+      }
     } catch (e: unknown) {
       error = e instanceof Error ? e.message : String(e);
     } finally {
@@ -527,6 +547,27 @@
         
         {#if indexMsg}
           <status-message type={indexMsgType}>{indexMsg}</status-message>
+        {/if}
+        
+        {#if indexErrors.length > 0}
+          <error-details>
+            <button class="toggle-errors" onclick={() => showErrors = !showErrors}>
+              {showErrors ? '▼' : '▶'} {indexErrors.length} file(s) failed
+            </button>
+            {#if showErrors}
+              <error-list>
+                {#each indexErrors.slice(0, 10) as err}
+                  <error-item>
+                    <span class="file">{err.file}</span>
+                    <span class="msg">{err.error}</span>
+                  </error-item>
+                {/each}
+                {#if indexErrors.length > 10}
+                  <error-item class="more">...and {indexErrors.length - 10} more</error-item>
+                {/if}
+              </error-list>
+            {/if}
+          </error-details>
         {/if}
 
         {#if indexing}
@@ -1254,5 +1295,60 @@
     color: #666;
     margin-top: 0.5rem;
     text-align: center;
+  }
+
+  error-details {
+    margin-top: 0.5rem;
+    font-size: 0.85rem;
+  }
+
+  .toggle-errors {
+    background: none;
+    border: none;
+    color: #f57c00;
+    cursor: pointer;
+    padding: 0.25rem 0;
+    font-size: 0.85rem;
+  }
+
+  .toggle-errors:hover {
+    text-decoration: underline;
+  }
+
+  error-list {
+    display: block;
+    margin-top: 0.5rem;
+    max-height: 200px;
+    overflow-y: auto;
+    background: #fff3e0;
+    border-radius: 4px;
+    padding: 0.5rem;
+  }
+
+  error-item {
+    display: block;
+    padding: 0.25rem 0;
+    border-bottom: 1px solid #ffe0b2;
+  }
+
+  error-item:last-child {
+    border-bottom: none;
+  }
+
+  error-item .file {
+    font-weight: 500;
+    color: #e65100;
+  }
+
+  error-item .msg {
+    display: block;
+    color: #666;
+    font-size: 0.8rem;
+    margin-top: 0.1rem;
+  }
+
+  error-item.more {
+    color: #999;
+    font-style: italic;
   }
 </style>

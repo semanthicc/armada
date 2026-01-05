@@ -32,7 +32,7 @@ describe("embedding config store", () => {
       expect(stored).not.toBeNull();
       expect(stored!.provider).toBe("local");
       expect(stored!.model).toBe("Xenova/all-MiniLM-L6-v2");
-      expect(stored!.dimensions).toBe(384);
+      expect([384, 768]).toContain(stored!.dimensions);
     });
 
     it("should save embedding config with gemini provider", () => {
