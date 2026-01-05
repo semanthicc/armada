@@ -1,5 +1,14 @@
 # Patchlog
 
+## [1.1.1] - 2026-01-05
+
+### Changed
+- Improved automention hint format: now uses \`// name\` (with space) and inline descriptions for cleaner UI
+- Updated system prompts to prioritize the \`captain\` CLI for resource management
+
+### Fixed
+- Captain Manager workflow now correctly appears in auto-suggestions when managing resources
+
 ## [1.1.0] - 2025-12-28
 
 ### Added
