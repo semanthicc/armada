@@ -1,8 +1,9 @@
 # LSP vs Semantic Search: Live Test Comparison
 
-**Date**: 2025-01-05
-**Index Status**: 270 chunks | gemini (768 dims) | Fresh (22m ago)
+**Date**: 2026-01-05 (Updated after v1.7.0 focus filter fix)
+**Index Status**: 270+ chunks | gemini (768 dims) | Fresh
 **Repo**: opencode-semanthicc
+**Version**: v1.7.0 (focus filtering fixed, AST chunking added)
 
 ---
 
@@ -496,39 +497,49 @@ semanthicc search "EmbeddingConfig interface type definition" focus:code
 
 **Query**: Find chunker implementation (production code vs tests)
 
-### Semantic focus:code vs focus:tests:
+**STATUS: BUG FIXED IN v1.7.0** ✅
+
+### Semantic focus:code vs focus:tests (AFTER v1.7.0 fix):
 ```
 semanthicc search "chunker split content into chunks" focus:code
 → #1: src/indexer/ast-chunker.ts (production) ✅
-→ #2: docs/v1.7.0-roadmap.md (DOCS!)
-→ #4: src/indexer/ast-chunker.test.ts (test file!)
+→ #2: src/indexer/chunker.ts (production) ✅
+→ #3: src/indexer/indexer.ts (production) ✅
+→ All results are production code!
 
 semanthicc search "chunker split content into chunks" focus:tests  
-→ EXACT SAME RESULTS! (no filtering difference)
+→ #1: src/indexer/ast-chunker.test.ts (test) ✅
+→ #2: src/indexer/indexer.test.ts (test) ✅
+→ All results are test files!
 ```
-- **Focus not working**: `focus:code` and `focus:tests` returned identical results
-- **Docs still rank high**: Even with `focus:code`, docs ranked #2
-- **BUG IDENTIFIED**: Focus parameter appears to have no effect
+- **Focus NOW WORKS**: `focus:code` and `focus:tests` return COMPLETELY DIFFERENT results
+- **Production isolated**: focus:code returns only `.ts` files (no tests)
+- **Tests isolated**: focus:tests returns only `.test.ts` files
 
 ### LSP Result:
 ```
 serena_find_symbol("splitInto", relative_path="src/indexer", substring_matching=true)
 → 2 production functions:
-  - splitIntoAstChunks → ast-chunker.ts:28-73
+  - splitIntoAstChunks → ast-chunker.ts:32-77
   - splitIntoChunks → chunker.ts:40-76
 ```
-No test files in result - path restriction worked perfectly.
+Path restriction works perfectly.
 
-### Verdict: **LSP WINS** ✅ (but exposes Semantic bug)
+### Verdict: **TIE** 🤝 (upgraded from LSP WIN after v1.7.0 fix)
 
 **Reasoning**: 
-1. LSP path restriction cleanly isolates production from tests
-2. Semantic `focus` parameter DOES NOT WORK - same results both ways
-3. This is a **BUG** in semanthicc - focus should apply a file pattern filter
+1. LSP path restriction cleanly isolates production from tests ✅
+2. Semantic `focus` parameter NOW WORKS after v1.7.0 fix ✅
+3. Both tools can now separate test from production code
+4. LSP: via path restriction (`relative_path="src/indexer"`)
+5. Semantic: via focus filter (`focus:code` vs `focus:tests`)
 
-**Bug Report**: `focus:code` vs `focus:tests` produces identical results. Need to investigate LanceDB boosting or filter implementation.
+**What Was Fixed in v1.7.0**:
+- Added WHERE clause to filter by file extension patterns
+- Increased boost multiplier from 1.5x to 3.0x for focus matching
+- Normalized Windows backslash paths to forward slashes for pattern matching
 
-**Use Case Guidance**: Filtering by file type (tests vs production) → LSP path restriction. Semantic focus is broken.
+**Use Case Guidance**: Both tools work for filtering test vs production. LSP uses path restriction, Semantic uses focus parameter.
 
 ---
 
@@ -671,7 +682,7 @@ semanthicc search "null pointer undefined access potential bug dangerous optiona
 | 9 | Cross-file flow | ⚠️ | ✅✅ | **Semantic** |
 | 10 | Anonymous functions | ✅✅ | ❌ | **LSP** |
 | 11 | Type definitions | ✅✅ | ⚠️ | **LSP** |
-| 12 | Focus filtering (test/prod) | ✅ | ❌ (BUG) | **LSP** |
+| 12 | Focus filtering (test/prod) | ✅ | ✅ | **TIE** (v1.7.0 fix) |
 | 13 | Vague intent | ❌ | ✅✅ | **Semantic** |
 | 14 | Multi-keyword technical | ✅ | ✅✅ | **Semantic** |
 | 15 | Bug hunting | ✅ | ✅ | **TIE** |
@@ -680,9 +691,11 @@ semanthicc search "null pointer undefined access potential bug dangerous optiona
 
 | Winner | Count |
 |--------|-------|
-| **LSP** | 6 |
+| **LSP** | 5 |
 | **Semantic** | 7 |
-| **TIE** | 2 |
+| **TIE** | 3 |
+
+> **Note**: Test 12 upgraded from LSP WIN → TIE after v1.7.0 focus filter fix.
 
 ---
 
@@ -696,7 +709,7 @@ semanthicc search "null pointer undefined access potential bug dangerous optiona
 | Pattern match symbols (`get*`, `*Handler`) | `serena_find_symbol(substring_matching=true)` |
 | Type/interface definitions | `serena_find_symbol(include_kinds=[5,11])` |
 | Anonymous function discovery | `serena_find_symbol("callback")` |
-| Isolate test vs production | `serena_find_symbol(relative_path="src/")` |
+| Isolate test vs production | `serena_find_symbol(relative_path="src/")` OR `focus:code`/`focus:tests` |
 | Get symbol body/implementation | `serena_find_symbol(include_body=true)` |
 | Type safety verification | `lsp_diagnostics(severity="error")` |
 
@@ -738,17 +751,15 @@ Semantic Dominates When:
 
 ## Bugs Discovered During Testing
 
-### BUG: `focus:code` vs `focus:tests` produces identical results
-**Severity**: Medium
-**Location**: `src/search/search.ts` or `src/lance/embeddings.ts`
-**Expected**: `focus:code` should boost `.ts` files, demote `.test.ts`
-**Actual**: No difference in ranking
+### ~~BUG: `focus:code` vs `focus:tests` produces identical results~~ **FIXED in v1.7.0** ✅
+**Status**: RESOLVED
+**Fix**: Added WHERE clause filtering + increased boost multiplier to 3.0x
+**PR**: v1.7.0 release
 
-### BUG: Docs ranked #1 with `focus:code`
-**Severity**: Medium
-**Tests**: Test 2, 5, 7
-**Expected**: Code files ranked higher than markdown
-**Actual**: Markdown often ranks #1-2 even with code focus
+### ~~BUG: Docs ranked #1 with `focus:code`~~ **FIXED in v1.7.0** ✅
+**Status**: RESOLVED  
+**Fix**: WHERE clause now filters by file extension patterns before ranking
+**Tests**: Test 2, 5, 7 - now properly rank code above docs when `focus:code` is used
 
 ---
 
@@ -768,10 +779,22 @@ Semantic Dominates When:
    - Searches content invisible to LSP (comments, strings, configs)
    - Surfaces related docs and tests automatically
 
-4. **Areas for Semantic improvement:**
-   - Fix focus filtering (code vs tests vs docs)
-   - Improve code ranking vs docs ranking
-   - Consider function-level chunks instead of line-based
+4. **~~Areas for Semantic improvement:~~ (Addressed in v1.7.0)**
+   - ~~Fix focus filtering (code vs tests vs docs)~~ ✅ FIXED
+   - ~~Improve code ranking vs docs ranking~~ ✅ FIXED (3x boost)
+   - Consider function-level chunks instead of line-based (AST chunking added)
+
+---
+
+## v1.7.0 Improvements Summary
+
+| Issue | Before | After v1.7.0 |
+|-------|--------|--------------|
+| Focus filtering | Broken - identical results | ✅ Works - WHERE clause + 3x boost |
+| Docs vs Code ranking | Docs ranked #1 with focus:code | ✅ Code prioritized with focus:code |
+| Test 12 verdict | LSP WIN | TIE (both tools work now) |
+| Path normalization | Windows backslashes broke patterns | ✅ Normalized to forward slashes |
+| AST chunking | Line-based only | ✅ Syntax-aware chunks with scope context |
 
 ---
 
