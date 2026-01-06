@@ -86,7 +86,8 @@ Do this thing...
 | Tool | Description |
 |------|-------------|
 | `list_workflows` | List all available scrolls |
-| `get_workflow` | Get a specific scroll's content |
+| `fetch_scroll` | Fetch a scroll's content (auto-executes `on_load` tools) |
+| `get_workflow` | [Deprecated] Alias for `fetch_scroll` |
 | `create_workflow` | Create a new scroll |
 | `edit_workflow` | Edit an existing scroll |
 | `rename_workflow` | Rename a scroll |
@@ -315,7 +316,7 @@ expand: false
 
 When `expand: false` is set:
 - Instead of injecting full `<workflow>` content
-- Injects a hint: `[//name → call get_workflow("name") to read]`
+- Injects a hint: `[//name → call fetch_scroll("name") to read]`
 - AI fetches content on-demand when needed
 
 **Global toggle**: Set `expandScrolls: false` in `captain.json` to make all scrolls hint-only by default.

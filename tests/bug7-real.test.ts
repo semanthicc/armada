@@ -46,7 +46,8 @@ description: "Test workflow"
       includeWarnings: [],
       content: 'suggests //5-approaches for analysis',
       source: 'global',
-      path: '/test'
+      path: '/test',
+    onLoad: []
     };
 
     const nestedWorkflow: Workflow = {
@@ -64,7 +65,8 @@ description: "Test workflow"
       includeWarnings: [],
       content: '# 5 Approaches content',
       source: 'global',
-      path: '/test'
+      path: '/test',
+    onLoad: []
     };
 
     const workflows = new Map<string, Workflow>();
@@ -102,7 +104,8 @@ description: "Test workflow"
       automention: 'false',
       content: 'try //5-approaches',
       source: 'global',
-      path: '/test'
+      path: '/test',
+    onLoad: []
     };
 
     const nestedWorkflow: Workflow = {
@@ -120,7 +123,8 @@ description: "Test workflow"
       includeWarnings: [],
       content: '# Content',
       source: 'global',
-      path: '/test'
+      path: '/test',
+    onLoad: []
     };
 
     const workflows = new Map<string, Workflow>();

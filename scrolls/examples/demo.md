@@ -1,19 +1,29 @@
+---
+description: Example workflow demonstrating on_load and captain_tool features
+on_load:
+  - examples/greet
+---
+
 # Example Workflow with Captain Tools
 
-This workflow demonstrates how to use `captain_tool` with custom TypeScript tools.
+This workflow demonstrates how to use `captain_tool` with custom TypeScript tools,
+and the `on_load` feature that auto-executes tools when the workflow is fetched.
+
+## On-Load Behavior
+
+When you call `fetch_scroll("examples/demo")`, the `examples/greet` tool runs automatically.
+Its output appears in the "On-Load Results" section below.
 
 ## Available Tools
-
-After loading this workflow, you can use these tools:
 
 - `captain_tool("examples/greet", { name: "World" })` — Greet someone
 - `captain_tool("examples/calculate", { a: 5, b: 3, op: "add" })` — Perform calculations
 
 ## Usage
 
-1. First, load this workflow with `get_workflow("examples/demo")`
-2. The available tools will be listed automatically
-3. Use `captain_tool(...)` to execute them
+1. Fetch this workflow with `fetch_scroll("examples/demo")`
+2. The `on_load` tools execute automatically
+3. Use `captain_tool(...)` to call additional tools
 
 ## Creating Your Own Tools
 

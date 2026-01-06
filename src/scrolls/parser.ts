@@ -26,6 +26,7 @@ export function parseScrollFrontmatter(fileContent: string): ParsedScrollFrontma
       orderInOrder: 'false',
       expand: true,
       include: [],
+      onLoad: [],
     };
   }
 
@@ -71,6 +72,8 @@ export function parseScrollFrontmatter(fileContent: string): ParsedScrollFrontma
   }
 
   const include = parseArrayField(yaml, 'include');
+  const onLoadSnake = parseArrayField(yaml, 'on_load');
+  const onLoad = onLoadSnake.length > 0 ? onLoadSnake : parseArrayField(yaml, 'onLoad');
 
   return {
     ...base,
@@ -81,6 +84,7 @@ export function parseScrollFrontmatter(fileContent: string): ParsedScrollFrontma
     orderInOrder: scrollInScroll,
     expand,
     include,
+    onLoad,
   };
 }
 

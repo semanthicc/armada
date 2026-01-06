@@ -65,6 +65,20 @@ const sessionWorkflows = new Map<string, Map<string, WorkflowRef>>();
 const processedAutoApply = new Set<string>();
 const sessionSpawnedAgents = new Map<string, Set<string>>();
 
+const ONLOAD_TIMEOUT_MS = 5000;
+
+async function executeWithTimeout<T>(
+  fn: () => Promise<T>,
+  timeoutMs: number
+): Promise<T> {
+  return Promise.race([
+    fn(),
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(`Timeout after ${timeoutMs}ms`)), timeoutMs)
+    ),
+  ]);
+}
+
 
 
 
@@ -74,25 +88,25 @@ const DISTINCTION_RULE = `
 <system-rule>
 **DISTINCTION RULE**:
 - **Managing Resources (Workflows/Rules/Crews)**:
-  - **STEP 1**: Fetch \`//captain-manager\` (via \`get_workflow("captain-manager")\`) to get management tools.
+  - **STEP 1**: Fetch \`//captain-manager\` (via \`fetch_scroll("captain-manager")\`) to get management tools.
   - **STEP 2**: Use \`captain_tool(...)\` for robust management (create/edit/read/delete).
   - **CLI Option**: \`captain <cmd> <type> <name>\` is available for simple tasks (list/delete).
   - **CRITICAL**: The \`.opencode/scrolls\` directory is MANAGED. NEVER use \`read\`, \`write\`, \`edit\`, or \`glob\` on workflow files directly. ALWAYS use \`captain_tool\` or CLI.
 - **Skills**: Markdown-defined capabilities (e.g., \`skills_brand_guidelines\`). Call via \`skill\` tool or \`skills_*\` dynamic tools (if present).
-- **Workflows**: Inline templates triggered by \`//name\` (e.g., \`//commit_review\`). Do NOT call them; just mention them.
+- **Workflows/Scrolls**: Inline templates triggered by \`//name\` (e.g., \`//commit_review\`). Do NOT call them; just mention them.
 
 **WORKFLOW XML HANDLING** (READ THIS, IT'S IMPORTANT):
-1. **\`<workflow name="X">\` IN MESSAGE**: The content is RIGHT THERE. Read it. Follow it. Execute it. Do NOT call \`get_workflow\` — that's stupid, the content is already in front of you.
-2. **\`[use_workflow:X-id]\` WITHOUT XML**: Orphan reference. Use \`get_workflow\` to retrieve it.
+1. **\`<workflow name="X">\` IN MESSAGE**: The content is RIGHT THERE. Read it. Follow it. Execute it. Do NOT call \`fetch_scroll\` — that's stupid, the content is already in front of you.
+2. **\`[use_workflow:X-id]\` WITHOUT XML**: Orphan reference. Use \`fetch_scroll\` to retrieve it.
 3. **\`[⚡ Workflow matched...]\` HINT**: System detected relevant workflows wrapped in brackets. FOR EACH, ask yourself:
    - "Does this workflow's description match what the user actually wants?"
    - "If I DON'T fetch this, will the user wonder why I ignored their relevant workflow?"
-   - If yes → call \`get_workflow("name")\` and apply it. No asking. No suggesting. Just do it.
+   - If yes → call \`fetch_scroll("name")\` and apply it. No asking. No suggesting. Just do it.
    - If no → Skip silently.
    - If unsure → Fetch (bias toward action).
    - Time limit: 3 seconds per decision. Don't overthink.
 4. **\`[Suggested workflows: //X]\` HINT**: Show this suggestion to the user. Do NOT auto-apply. Let user decide.
-5. **User explicitly runs \`//workflow\`**: If the workflow content is NOT already in the conversation history, use \`get_workflow\` to fetch fresh context before executing.
+5. **User explicitly runs \`//workflow\`**: If the workflow content is NOT already in the conversation history, use \`fetch_scroll\` to fetch fresh context before executing.
 
 **WHEN MULTIPLE WORKFLOWS MATCH**:
 1. Is there ONE obvious match? → Fetch only that one
@@ -103,10 +117,10 @@ const DISTINCTION_RULE = `
 **ANTI-PATTERN — DO NOT DO THIS**:
 User: "validate the changes"
 Hint: [⚡ Workflow matched... //inspect]
-Assistant: *runs tests manually without calling get_workflow("inspect")*
+Assistant: *runs tests manually without calling fetch_scroll("inspect")*
 THIS IS WRONG. The workflow EXISTS for this purpose. USE IT.
 
-**CREATING WORKFLOWS**: When user asks to create a workflow, use the \`create_workflow\` tool. NEVER manually create .md files.
+**CREATING WORKFLOWS**: When user asks to create a workflow, use the \`captain_tool\` system. NEVER manually create .md files.
 </system-rule>
 `;
 
@@ -130,9 +144,9 @@ function buildWorkflowSystemPrompt(workflows: Map<string, Workflow>, activeAgent
     parts.push(
       `\n<workflow-catalog description="Available auto-workflows with their descriptions. Use these to decide relevance.">\n${catalogEntries.join('\n')}\n</workflow-catalog>\n\n` +
       `<auto-workflow-behavior>\n` +
-      `When you see [Auto-apply workflows: //X — "description" — if relevant, use get_workflow("name") to fetch and apply]:\n` +
+      `When you see [Auto-apply workflows: //X — "description" — if relevant, use fetch_scroll("name") to fetch and apply]:\n` +
       `1. The description is RIGHT THERE in the hint — read it\n` +
-      `2. If description matches user's intent → call get_workflow("X") and APPLY it\n` +
+      `2. If description matches user's intent → call fetch_scroll("X") and APPLY it\n` +
       `3. No asking permission. No "would you like me to...". Just fetch and execute.\n` +
       `4. If description does NOT match intent → ignore, proceed normally\n` +
       `\n` +
@@ -225,9 +239,9 @@ export const WorkflowsPlugin: Plugin = async (ctx: PluginInput) => {
         output.system.push(
           `<workflow-catalog description="Available auto-workflows with their descriptions. Use these to decide relevance.">\n${catalogEntries.join('\n')}\n</workflow-catalog>\n\n` +
           `<auto-workflow-behavior>\n` +
-          `When you see [Auto-apply workflows: //X — "description" — if relevant, use get_workflow("name") to fetch and apply]:\n` +
+          `When you see [Auto-apply workflows: //X — "description" — if relevant, use fetch_scroll("name") to fetch and apply]:\n` +
           `1. The description is RIGHT THERE in the hint — read it\n` +
-          `2. If description matches user's intent → call get_workflow("X") and APPLY it\n` +
+          `2. If description matches user's intent → call fetch_scroll("X") and APPLY it\n` +
           `3. No asking permission. No "would you like me to...". Just fetch and execute.\n` +
           `4. If description does NOT match intent → ignore, proceed normally\n` +
           `\n` +
@@ -499,8 +513,71 @@ export const WorkflowsPlugin: Plugin = async (ctx: PluginInput) => {
         },
       }),
 
+      fetch_scroll: tool({
+        description: 'Fetch the full content of a scroll (workflow template) by name. If scroll has on_load tools defined, they execute automatically and results are embedded.',
+        args: {
+          name: tool.schema
+            .string()
+            .describe('The scroll name (without the // prefix), e.g., "linus-torvalds"'),
+        },
+        async execute(args) {
+          workflows = loadOrders(directory);
+
+          const workflow = workflows.get(args.name);
+          if (!workflow) {
+            const available = [...workflows.keys()];
+            const availableStr = available.length > 0 ? available.map((a) => `//${a}`).join(', ') : 'none';
+            return `Scroll "${args.name}" not found.\n\nAvailable: ${availableStr}\n\nHint: Create .md files in ~/.config/opencode/scrolls/ or .opencode/scrolls/`;
+          }
+
+          const folderInfo = workflow.folder ? `\nFolder: ${workflow.folder}` : '';
+          
+          const tools = discoverToolsForWorkflow(directory, workflow.name);
+          let toolsSection = '';
+          if (tools.length > 0) {
+            const toolLines = tools.map((t) => `- \`captain_tool("${t.path}", {...})\` — ${t.name}`);
+            toolsSection = `\n\n## Available Tools\n${toolLines.join('\n')}`;
+          }
+
+          let onLoadSection = '';
+          const onLoadTools = workflow.onLoad || [];
+          if (onLoadTools.length > 0) {
+            const captainTool = createCaptainTool(directory);
+            const results: Array<{ tool: string; result: string; error?: boolean }> = [];
+            
+            for (const toolPath of onLoadTools) {
+              try {
+                const result = await executeWithTimeout(
+                  () => captainTool.execute({ tool: toolPath, params: {} }),
+                  ONLOAD_TIMEOUT_MS
+                );
+                results.push({
+                  tool: toolPath,
+                  result: typeof result === 'string' ? result : JSON.stringify(result, null, 2),
+                });
+              } catch (err) {
+                results.push({
+                  tool: toolPath,
+                  result: `⚠️ Failed: ${err instanceof Error ? err.message : String(err)}`,
+                  error: true,
+                });
+              }
+            }
+
+            if (results.length > 0) {
+              const resultLines = results.map((r) => 
+                `### ${r.tool}${r.error ? ' (failed)' : ''}\n\`\`\`\n${r.result}\n\`\`\``
+              );
+              onLoadSection = `\n\n## On-Load Results (auto-executed)\n${resultLines.join('\n\n')}`;
+            }
+          }
+          
+          return `# Scroll: //${workflow.name}\nSource: ${workflow.source}${folderInfo}\nPath: ${workflow.path}\n\n${workflow.content}${toolsSection}${onLoadSection}`;
+        },
+      }),
+
       get_workflow: tool({
-        description: 'Get the full content of a specific workflow template by name',
+        description: '[DEPRECATED: Use fetch_scroll] Get the full content of a specific workflow template by name',
         args: {
           name: tool.schema
             .string()
@@ -516,7 +593,7 @@ export const WorkflowsPlugin: Plugin = async (ctx: PluginInput) => {
             return `Workflow "${args.name}" not found.\n\nAvailable: ${availableStr}\n\nHint: Create .md files in ~/.config/opencode/workflows/ or .opencode/workflows/`;
           }
 
-const folderInfo = workflow.folder ? `\nFolder: ${workflow.folder}` : '';
+          const folderInfo = workflow.folder ? `\nFolder: ${workflow.folder}` : '';
           
           const tools = discoverToolsForWorkflow(directory, workflow.name);
           let toolsSection = '';
@@ -524,10 +601,43 @@ const folderInfo = workflow.folder ? `\nFolder: ${workflow.folder}` : '';
             const toolLines = tools.map((t) => `- \`captain_tool("${t.path}", {...})\` — ${t.name}`);
             toolsSection = `\n\n## Available Tools\n${toolLines.join('\n')}`;
           }
+
+          let onLoadSection = '';
+          const onLoadTools = workflow.onLoad || [];
+          if (onLoadTools.length > 0) {
+            const captainTool = createCaptainTool(directory);
+            const results: Array<{ tool: string; result: string; error?: boolean }> = [];
+            
+            for (const toolPath of onLoadTools) {
+              try {
+                const result = await executeWithTimeout(
+                  () => captainTool.execute({ tool: toolPath, params: {} }),
+                  ONLOAD_TIMEOUT_MS
+                );
+                results.push({
+                  tool: toolPath,
+                  result: typeof result === 'string' ? result : JSON.stringify(result, null, 2),
+                });
+              } catch (err) {
+                results.push({
+                  tool: toolPath,
+                  result: `⚠️ Failed: ${err instanceof Error ? err.message : String(err)}`,
+                  error: true,
+                });
+              }
+            }
+
+            if (results.length > 0) {
+              const resultLines = results.map((r) => 
+                `### ${r.tool}${r.error ? ' (failed)' : ''}\n\`\`\`\n${r.result}\n\`\`\``
+              );
+              onLoadSection = `\n\n## On-Load Results (auto-executed)\n${resultLines.join('\n\n')}`;
+            }
+          }
           
-return `# Workflow: //${workflow.name}\nSource: ${workflow.source}${folderInfo}\nPath: ${workflow.path}\n\n${workflow.content}${toolsSection}`;
+          return `# Workflow: //${workflow.name}\nSource: ${workflow.source}${folderInfo}\nPath: ${workflow.path}\n\n${workflow.content}${toolsSection}${onLoadSection}`;
         },
-    }),
+      }),
 
       captain_tool: (() => {
         const captainTool = createCaptainTool(directory);

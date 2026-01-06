@@ -1,11 +1,29 @@
 import type { TagEntry, TagOrGroup, BaseParsedFrontmatter } from './types';
 
 export function parseArrayField(yaml: string, fieldName: string): string[] {
-  const regex = new RegExp(`^${fieldName}:\\s*(?:\\[(.*)\\]|(.*))`, 'm');
-  const match = yaml.match(regex);
+  const multiLineRegex = new RegExp(`^${fieldName}:\\s*\\r?\\n((?:\\s+-[^\\n]*\\n?)*)`, 'm');
+  const multiMatch = yaml.match(multiLineRegex);
+  if (multiMatch && multiMatch[1]) {
+    const lines = multiMatch[1].split(/\r?\n/);
+    const items: string[] = [];
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (trimmed.startsWith('- ')) {
+        items.push(trimmed.slice(2).trim().replace(/['"]/g, ''));
+      }
+    }
+    if (items.length > 0) {
+      return items.filter(a => a);
+    }
+  }
+
+  const inlineRegex = new RegExp(`^${fieldName}:\\s*(?:\\[(.*)\\]|(.+))$`, 'm');
+  const match = yaml.match(inlineRegex);
   if (!match) return [];
+  
   const raw = match[1] || match[2];
-  if (!raw) return [];
+  if (!raw || !raw.trim()) return [];
+  
   return raw.split(',').map(a => a.trim().replace(/['"]/g, '')).filter(a => a);
 }
 

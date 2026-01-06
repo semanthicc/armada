@@ -40,12 +40,13 @@ export interface BasePrompt {
   description: string;
   aliases: string[];
   tags: TagEntry[];
-  onlyFor: string[];           // Agent visibility filter
+  onlyFor: string[];
   content: string;
   source: PromptSource;
   path: string;
-  folder?: string;             // Subfolder for organization
-  promptType: PromptType;      // Derived from folder location
+  folder?: string;
+  promptType: PromptType;
+  onLoad?: string[];
 }
 
 /**

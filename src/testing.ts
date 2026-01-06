@@ -38,6 +38,7 @@ export function createMockOrder(partial: Partial<Order> & { name: string }): Ord
     content: '',
     source: 'global',
     path: `/mock/${partial.name}.md`,
+    onLoad: [],
     ...partial,
   };
 }

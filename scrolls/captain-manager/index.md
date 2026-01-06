@@ -113,3 +113,25 @@ description: Updated description
 ## CLI Quick Reference
 If you prefer CLI for simple tasks:
 `captain <command> <type> <name> [options]`
+
+## On-Load Feature
+
+Workflows can specify tools to auto-execute when fetched via `fetch_scroll`:
+
+```yaml
+---
+description: My workflow
+on_load:
+  - my-workflow/init
+  - my-workflow/discover
+---
+```
+
+When someone calls `fetch_scroll("my-workflow")`, the listed tools execute automatically
+and their results appear in the "On-Load Results" section of the response.
+
+**Best practices for on_load tools:**
+- Keep them read-only (no mutations)
+- Keep them fast (< 1 second)
+- Make them idempotent
+- Handle errors gracefully

@@ -8,7 +8,7 @@ import {
 import type { Order } from '../src/scrolls/types';
 
 function mockOrder(name: string, desc: string): Order {
-  return { name, description: desc, content: '', source: 'global', aliases: [], tags: [], onlyFor: [], automention: 'true', spawnFor: [], scrollInScroll: 'false', expand: true, include: [], includeWarnings: [], path: '', promptType: 'scroll' };
+  return { name, description: desc, content: '', source: 'global', aliases: [], tags: [], onlyFor: [], automention: 'true', spawnFor: [], scrollInScroll: 'false', expand: true, include: [], includeWarnings: [], path: '', promptType: 'scroll', onLoad: [] };
 }
 
 describe('stripExistingHints', () => {

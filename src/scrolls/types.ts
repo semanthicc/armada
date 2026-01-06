@@ -18,6 +18,7 @@ export interface Scroll extends BasePrompt {
   expand: boolean;
   include: string[];
   includeWarnings: string[];
+  onLoad: string[];
 }
 export type Order = Scroll;
 
@@ -58,6 +59,7 @@ export interface ParsedScrollFrontmatter {
   spawnAt: SpawnForEntry[];
   expand: boolean;
   include: string[];
+  onLoad: string[];
   body: string;
 }
 export type ParsedOrderFrontmatter = ParsedScrollFrontmatter;

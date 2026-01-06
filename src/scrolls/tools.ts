@@ -47,6 +47,7 @@ export function loadScrolls(projectDir: string): Map<string, Scroll> {
       source,
       path: filePath,
       folder,
+      onLoad: parsed.onLoad,
     };
     
     if (parsed.include.length > 0) {

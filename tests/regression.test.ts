@@ -49,7 +49,8 @@ describe('Bug Fixes Regression Tests', () => {
       includeWarnings: [],
       content: 'content',
       source: 'global',
-      path: '/path'
+      path: '/path',
+    onLoad: []
     };
 
     test('should NOT trigger when workflow already referenced via [use_workflow:]', () => {
@@ -109,7 +110,8 @@ describe('Bug Fixes Regression Tests', () => {
       includeWarnings: [],
       content: 'content',
       source: 'global',
-      path: '/path'
+      path: '/path',
+    onLoad: []
     };
 
     test('SHOULD trigger automention when tags match, even with "// " prefix', () => {
@@ -141,7 +143,8 @@ describe('Bug Fixes Regression Tests', () => {
       includeWarnings: [],
       content: 'content',
       source: 'global',
-      path: '/path'
+      path: '/path',
+    onLoad: []
     };
 
     test('EDGE CASE: should trigger when message contains code comments + legitimate tags', () => {

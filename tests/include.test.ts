@@ -29,6 +29,7 @@ function createMockScroll(overrides: Partial<Scroll> & { name: string; path: str
     content: '',
     source: 'project',
     folder: undefined,
+    onLoad: [],
     ...overrides,
   };
 }
