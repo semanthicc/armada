@@ -1,15 +1,17 @@
 <script lang="ts">
   import type { StatusResponse } from '../../types';
-  import { indexProject as apiIndexProject, deleteIndex as apiDeleteIndex, stopIndex as apiStopIndex, type IndexProgressEvent } from '../api';
+  import { indexProject as apiIndexProject, deleteIndex as apiDeleteIndex, stopIndex as apiStopIndex, updateProjectAutoIndex, type IndexProgressEvent } from '../api';
 
   interface Props {
     status: StatusResponse;
     projectId: number | null;
+    autoIndex: boolean;
     embeddingWarning: StatusResponse['embeddingWarning'];
     onStatusRefresh: () => void;
+    onAutoIndexChange: (newVal: boolean) => void;
   }
 
-  let { status, projectId, embeddingWarning, onStatusRefresh }: Props = $props();
+  let { status, projectId, autoIndex, embeddingWarning, onStatusRefresh, onAutoIndexChange }: Props = $props();
 
   let indexing = $state(false);
   let deletingIndex = $state(false);
@@ -100,6 +102,17 @@
     await handleDelete();
     await handleIndex();
   }
+
+  async function toggleAutoIndex() {
+    if (!projectId) return;
+    try {
+      const newVal = !autoIndex;
+      await updateProjectAutoIndex(projectId, newVal);
+      onAutoIndexChange(newVal);
+    } catch (e) {
+      console.error('Failed to toggle auto-index', e);
+    }
+  }
 </script>
 
 <info-card>
@@ -165,6 +178,17 @@
       >
         {indexing ? 'Scanning...' : 'Sync Changes'}
       </button>
+
+      {#if projectId}
+        <button 
+          class="action-btn auto-index" 
+          class:active={autoIndex}
+          onclick={toggleAutoIndex}
+          title="Automatically sync changes when switching to this project"
+        >
+          {autoIndex ? '✓ Auto-Index On' : 'Auto-Index Off'}
+        </button>
+      {/if}
 
       {#if embeddingWarning || (status.coverage && status.coverage.coveragePercent < 100)}
         <button class="action-btn force" onclick={handleForceReindex} disabled={deletingIndex}>
@@ -338,6 +362,21 @@
     border: 1px solid #0d47a1;
     padding: 0.5rem 1rem;
     border-radius: 4px;
+  }
+
+  button.action-btn.auto-index {
+    border: 1px solid #ccc;
+    background: white;
+    color: #666;
+    padding: 0.5rem 1rem;
+    border-radius: 4px;
+  }
+
+  button.action-btn.auto-index.active {
+    background: #e8f5e9;
+    color: #2e7d32;
+    border-color: #a5d6a7;
+    font-weight: 500;
   }
 
   button.action-btn.force {

@@ -60,6 +60,15 @@
     projects = updatedProjects;
   }
 
+  function handleAutoIndexChange(newVal: boolean) {
+    if (selectedProjectId) {
+      const idx = projects.findIndex(p => p.id === selectedProjectId);
+      if (idx !== -1) {
+        projects[idx] = { ...projects[idx], auto_index: newVal };
+      }
+    }
+  }
+
   function handleStatusRefresh() {
     loadStatus();
   }
@@ -69,6 +78,9 @@
     loadProjects();
     loadStatus();
   });
+  
+  let currentProject = $derived(projects.find(p => p.id === selectedProjectId));
+  let currentAutoIndex = $derived(currentProject?.auto_index ?? false);
 </script>
 
 <app-shell>
@@ -79,14 +91,13 @@
       {projects}
       {selectedProjectId}
       onProjectChange={handleProjectChange}
-      onProjectsUpdate={handleProjectsUpdate}
     />
 
     <nav-bar>
-      <button class="tab-btn" class:active={tab === 'overview'} onclick={() => tab = 'overview'}>Overview</button>
-      <button class="tab-btn" class:active={tab === 'memories'} onclick={() => tab = 'memories'}>Memories</button>
-      <button class="tab-btn" class:active={tab === 'search'} onclick={() => tab = 'search'}>Search</button>
-      <button class="tab-btn" class:active={tab === 'settings'} onclick={() => tab = 'settings'}>Settings</button>
+      <button class="tab-btn" class:active={tab === 'overview'} onclick={() => { console.log('tab: overview'); tab = 'overview'; }}>Overview</button>
+      <button class="tab-btn" class:active={tab === 'memories'} onclick={() => { console.log('tab: memories'); tab = 'memories'; }}>Memories</button>
+      <button class="tab-btn" class:active={tab === 'search'} onclick={() => { console.log('tab: search'); tab = 'search'; }}>Search</button>
+      <button class="tab-btn" class:active={tab === 'settings'} onclick={() => { console.log('tab: settings'); tab = 'settings'; }}>Settings</button>
     </nav-bar>
   </app-header>
 
@@ -99,8 +110,10 @@
       <StatusPanel 
         {status}
         projectId={selectedProjectId}
+        autoIndex={currentAutoIndex}
         embeddingWarning={status.embeddingWarning}
         onStatusRefresh={handleStatusRefresh}
+        onAutoIndexChange={handleAutoIndexChange}
       />
     {:else if tab === 'memories'}
       <MemoriesTab projectId={selectedProjectId} />
