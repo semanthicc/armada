@@ -1,0 +1,483 @@
+import { getDb } from "../db";
+import type { SemanthiccContext } from "../context";
+import type { Memory, CreateMemoryInput, MemoryWithEffectiveConfidence } from "../types";
+import { INJECTABLE_CONCEPT_TYPES } from "../constants";
+import { log } from "../logger";
+import {
+  HEURISTICS,
+  getEffectiveConfidence,
+  calculateValidatedConfidence,
+  calculateViolatedConfidence,
+  shouldPromoteToGolden,
+  shouldDemoteFromGolden,
+} from "./confidence";
+
+function getLegacyContext(): SemanthiccContext {
+  return { db: getDb() };
+}
+
+export class DuplicateMemoryError extends Error {
+  constructor(public existingId: number) {
+    super(`Duplicate memory exists (id: ${existingId})`);
+    this.name = "DuplicateMemoryError";
+  }
+}
+
+export function addMemory(ctxOrInput: SemanthiccContext | CreateMemoryInput, input?: CreateMemoryInput): Memory {
+  const ctx = input ? (ctxOrInput as SemanthiccContext) : getLegacyContext();
+  const data = input ?? (ctxOrInput as CreateMemoryInput);
+  
+  const projectId = data.project_id ?? null;
+  
+  const existingStmt = ctx.db.prepare(`
+    SELECT id FROM memories 
+    WHERE content = ? 
+    AND concept_type = ?
+    AND ((project_id IS NULL AND ? IS NULL) OR project_id = ?)
+    AND status = 'current'
+    LIMIT 1
+  `);
+  const existing = existingStmt.get(data.content, data.concept_type, projectId, projectId) as { id: number } | null;
+  
+  if (existing) {
+    throw new DuplicateMemoryError(existing.id);
+  }
+  
+  const stmt = ctx.db.prepare(`
+    INSERT INTO memories (concept_type, content, domain, project_id, source, source_session_id, source_tool, keywords)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    RETURNING *
+  `);
+
+  return stmt.get(
+    data.concept_type,
+    data.content,
+    data.domain ?? null,
+    projectId,
+    data.source ?? "explicit",
+    data.source_session_id ?? null,
+    data.source_tool ?? null,
+    data.keywords ?? null
+  ) as Memory;
+}
+
+export function getMemory(ctxOrId: SemanthiccContext | number, id?: number): Memory | null {
+  const ctx = typeof id === "number" ? (ctxOrId as SemanthiccContext) : getLegacyContext();
+  const memoryId = id ?? (ctxOrId as number);
+  
+  const stmt = ctx.db.prepare("SELECT * FROM memories WHERE id = ? AND status != 'archived'");
+  return stmt.get(memoryId) as Memory | null;
+}
+
+export function deleteMemory(ctxOrId: SemanthiccContext | number, id?: number): boolean {
+  const ctx = typeof id === "number" ? (ctxOrId as SemanthiccContext) : getLegacyContext();
+  const memoryId = id ?? (ctxOrId as number);
+  
+  ctx.db.prepare("UPDATE memories SET superseded_by = NULL WHERE superseded_by = ?").run(memoryId);
+  ctx.db.prepare("UPDATE memories SET evolved_from = NULL WHERE evolved_from = ?").run(memoryId);
+  
+  const stmt = ctx.db.prepare("UPDATE memories SET status = 'archived', updated_at = CURRENT_TIMESTAMP WHERE id = ?");
+  const result = stmt.run(memoryId);
+  return result.changes > 0;
+}
+
+
+export function restoreMemory(ctxOrId: SemanthiccContext | number, id?: number): boolean {
+  const ctx = typeof id === "number" ? (ctxOrId as SemanthiccContext) : getLegacyContext();
+  const memoryId = id ?? (ctxOrId as number);
+  
+  const stmt = ctx.db.prepare("UPDATE memories SET status = 'current', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'archived'");
+  const result = stmt.run(memoryId);
+  return result.changes > 0;
+}
+
+
+export function updateMemory(
+  ctx: SemanthiccContext, 
+  id: number, 
+  updates: { content?: string; concept_type?: string; domain?: string | null; confidence?: number }
+): boolean {
+  const sets: string[] = [];
+  const values: (string | number | null)[] = [];
+  
+  if (updates.content !== undefined) {
+    sets.push("content = ?");
+    values.push(updates.content);
+  }
+  if (updates.concept_type !== undefined) {
+    sets.push("concept_type = ?");
+    values.push(updates.concept_type);
+  }
+  if (updates.domain !== undefined) {
+    sets.push("domain = ?");
+    values.push(updates.domain);
+  }
+  if (updates.confidence !== undefined) {
+    sets.push("confidence = ?");
+    values.push(updates.confidence);
+  }
+  
+  if (sets.length === 0) return false;
+  
+  values.push(id);
+  const stmt = ctx.db.prepare(`UPDATE memories SET ${sets.join(", ")} WHERE id = ?`);
+  const result = stmt.run(...values);
+  log.db.debug(`updateMemory id=${id}, changes=${result.changes}, updates=`, updates);
+  return result.changes > 0;
+}
+
+export function findDuplicates(ctx: SemanthiccContext, projectId: number | null): Array<{ content: string; ids: number[]; count: number }> {
+  const stmt = ctx.db.prepare(`
+    SELECT content, GROUP_CONCAT(id) as ids, COUNT(*) as count
+    FROM memories
+    WHERE status = 'current'
+    AND ((project_id IS NULL AND ? IS NULL) OR project_id = ? OR project_id IS NULL)
+    GROUP BY content
+    HAVING COUNT(*) > 1
+    ORDER BY count DESC
+  `);
+  const rows = stmt.all(projectId, projectId) as Array<{ content: string; ids: string; count: number }>;
+  return rows.map(r => ({
+    content: r.content,
+    ids: r.ids.split(",").map(Number),
+    count: r.count
+  }));
+}
+
+export function purgeDuplicates(ctx: SemanthiccContext, projectId: number | null): number {
+  const duplicates = findDuplicates(ctx, projectId);
+  let deleted = 0;
+  
+  for (const dup of duplicates) {
+    // Keep the first (oldest) ID, delete the rest
+    const idsToDelete = dup.ids.slice(1);
+    for (const id of idsToDelete) {
+      if (deleteMemory(ctx, id)) {
+        deleted++;
+      }
+    }
+  }
+  
+  log.db.info(`purgeDuplicates deleted ${deleted} duplicate memories`);
+  return deleted;
+}
+
+export interface ListMemoriesOptions {
+  projectId?: number | null;
+  domain?: string;
+  domains?: string[];
+  conceptTypes?: string[] | readonly string[];
+  includeGlobal?: boolean;
+  includeHistory?: boolean;
+  limit?: number;
+}
+
+export function listMemories(
+  ctxOrOptions: SemanthiccContext | ListMemoriesOptions,
+  options?: ListMemoriesOptions
+): MemoryWithEffectiveConfidence[] {
+  const ctx = options ? (ctxOrOptions as SemanthiccContext) : getLegacyContext();
+  const opts = options ?? (ctxOrOptions as ListMemoriesOptions);
+  
+  const {
+    projectId = null,
+    domain,
+    domains,
+    conceptTypes = INJECTABLE_CONCEPT_TYPES,
+    includeGlobal = true,
+    includeHistory = false,
+    limit = HEURISTICS.MAX_INJECTION_COUNT,
+  } = opts;
+
+  let sql = `
+    SELECT * FROM memories 
+    WHERE concept_type IN (${conceptTypes.map(() => "?").join(", ")})
+  `;
+  const params: (string | number | null)[] = [...conceptTypes];
+
+  if (!includeHistory) {
+    sql += " AND status = 'current'";
+  }
+
+  if (projectId !== null) {
+    if (includeGlobal) {
+      sql += " AND (project_id = ? OR project_id IS NULL)";
+    } else {
+      sql += " AND project_id = ?";
+    }
+    params.push(projectId);
+  }
+  // When projectId is null and includeGlobal is true, show ALL memories (no filter)
+
+  if (domains && domains.length > 0) {
+    const placeholders = domains.map(() => "?").join(", ");
+    sql += ` AND (domain IN (${placeholders}) OR domain IS NULL)`;
+    params.push(...domains);
+  } else if (domain) {
+    sql += " AND domain = ?";
+    params.push(domain);
+  }
+
+  sql += " ORDER BY is_golden DESC, confidence DESC";
+  sql += ` LIMIT ${limit * 2}`;
+
+  const stmt = ctx.db.prepare(sql);
+  const memories = stmt.all(...params) as Memory[];
+
+  return memories
+    .map((m) => ({
+      ...m,
+      is_golden: Boolean(m.is_golden),
+      effectiveConfidence: getEffectiveConfidence(
+        m.confidence,
+        Boolean(m.is_golden),
+        m.last_validated_at,
+        m.created_at
+      ),
+    }))
+    .filter((m) => m.effectiveConfidence > HEURISTICS.MIN_EFFECTIVE_CONFIDENCE)
+    .sort((a, b) => b.effectiveConfidence - a.effectiveConfidence)
+    .slice(0, limit);
+}
+
+export function validateMemory(ctxOrId: SemanthiccContext | number, id?: number): Memory | null {
+  const ctx = typeof id === "number" ? (ctxOrId as SemanthiccContext) : getLegacyContext();
+  const memoryId = id ?? (ctxOrId as number);
+  
+  const memory = getMemory(ctx, memoryId);
+  if (!memory) return null;
+
+  const newConfidence = calculateValidatedConfidence(memory.confidence);
+  const newTimesValidated = memory.times_validated + 1;
+  const promoteToGolden = shouldPromoteToGolden(
+    newConfidence,
+    newTimesValidated,
+    memory.times_violated
+  );
+
+  const stmt = ctx.db.prepare(`
+    UPDATE memories SET
+      times_validated = ?,
+      confidence = ?,
+      is_golden = ?,
+      last_validated_at = ?,
+      updated_at = ?
+    WHERE id = ?
+    RETURNING *
+  `);
+
+  const now = Date.now();
+  return stmt.get(
+    newTimesValidated,
+    newConfidence,
+    promoteToGolden ? 1 : (memory.is_golden ? 1 : 0),
+    now,
+    now,
+    memoryId
+  ) as Memory;
+}
+
+export function violateMemory(ctxOrId: SemanthiccContext | number, id?: number): Memory | null {
+  const ctx = typeof id === "number" ? (ctxOrId as SemanthiccContext) : getLegacyContext();
+  const memoryId = id ?? (ctxOrId as number);
+  
+  const memory = getMemory(ctx, memoryId);
+  if (!memory) return null;
+
+  const newConfidence = calculateViolatedConfidence(memory.confidence);
+  const newTimesViolated = memory.times_violated + 1;
+  const demoteFromGolden = memory.is_golden && shouldDemoteFromGolden(newTimesViolated);
+
+  const stmt = ctx.db.prepare(`
+    UPDATE memories SET
+      times_violated = ?,
+      confidence = ?,
+      is_golden = ?,
+      updated_at = ?
+    WHERE id = ?
+    RETURNING *
+  `);
+
+  return stmt.get(
+    newTimesViolated,
+    newConfidence,
+    demoteFromGolden ? 0 : (memory.is_golden ? 1 : 0),
+    Date.now(),
+    memoryId
+  ) as Memory;
+}
+
+export interface SupersedeResult {
+  old: Memory;
+  new: Memory;
+}
+
+export function supersedeMemory(
+  ctxOrOldId: SemanthiccContext | number,
+  oldIdOrNewContent: number | string,
+  newContentOrNote?: string,
+  evolutionNote?: string
+): SupersedeResult | null {
+  let ctx: SemanthiccContext;
+  let oldId: number;
+  let newContent: string;
+  let note: string | undefined;
+  
+  if (typeof ctxOrOldId === "number") {
+    ctx = getLegacyContext();
+    oldId = ctxOrOldId;
+    newContent = oldIdOrNewContent as string;
+    note = newContentOrNote;
+  } else {
+    ctx = ctxOrOldId;
+    oldId = oldIdOrNewContent as number;
+    newContent = newContentOrNote!;
+    note = evolutionNote;
+  }
+  
+  const oldMemory = getMemory(ctx, oldId);
+
+  if (!oldMemory) return null;
+  if (oldMemory.status !== "current") return null;
+
+  const newMemory = addMemory(ctx, {
+    concept_type: oldMemory.concept_type,
+    content: newContent,
+    domain: oldMemory.domain ?? undefined,
+    project_id: oldMemory.project_id ?? undefined,
+    source: "supersede",
+  });
+
+  const now = Date.now();
+  const updateStmt = ctx.db.prepare(`
+    UPDATE memories SET
+      status = 'superseded',
+      superseded_by = ?,
+      superseded_at = ?,
+      evolution_note = ?,
+      updated_at = ?
+    WHERE id = ?
+  `);
+  updateStmt.run(newMemory.id, now, note ?? null, now, oldId);
+
+  const setEvolvedStmt = ctx.db.prepare(`
+    UPDATE memories SET evolved_from = ? WHERE id = ?
+  `);
+  setEvolvedStmt.run(oldId, newMemory.id);
+
+  return {
+    old: getMemory(ctx, oldId)!,
+    new: getMemory(ctx, newMemory.id)!,
+  };
+}
+
+export function archiveMemory(ctxOrId: SemanthiccContext | number, id?: number): boolean {
+  const ctx = typeof id === "number" ? (ctxOrId as SemanthiccContext) : getLegacyContext();
+  const memoryId = id ?? (ctxOrId as number);
+  
+  const stmt = ctx.db.prepare("UPDATE memories SET status = 'archived', updated_at = ? WHERE id = ?");
+  const result = stmt.run(Date.now(), memoryId);
+  return result.changes > 0;
+}
+
+export function getMemoryChain(ctxOrId: SemanthiccContext | number, memoryId?: number): Memory[] {
+  const ctx = typeof memoryId === "number" ? (ctxOrId as SemanthiccContext) : getLegacyContext();
+  const id = memoryId ?? (ctxOrId as number);
+  
+  const start = getMemory(ctx, id);
+  if (!start) return [];
+
+  let root = start;
+  while (root.evolved_from) {
+    const parent = getMemory(ctx, root.evolved_from);
+    if (!parent) break;
+    root = parent;
+  }
+
+  const chain: Memory[] = [root];
+  let current = root;
+  while (current.superseded_by) {
+    const next = getMemory(ctx, current.superseded_by);
+    if (!next) break;
+    chain.push(next);
+    current = next;
+  }
+
+  return chain;
+}
+
+export function promoteMemory(
+  ctxOrId: SemanthiccContext | number,
+  idOrForce?: number | boolean,
+  force?: boolean
+): Memory | null {
+  let ctx: SemanthiccContext;
+  let memoryId: number;
+  let forcePromote: boolean;
+
+  if (typeof ctxOrId === "number") {
+    ctx = getLegacyContext();
+    memoryId = ctxOrId;
+    forcePromote = (idOrForce as boolean) ?? false;
+  } else {
+    ctx = ctxOrId;
+    memoryId = idOrForce as number;
+    forcePromote = force ?? false;
+  }
+
+  const memory = getMemory(ctx, memoryId);
+  if (!memory) return null;
+  
+  if (memory.project_id === null) return memory;
+
+  // Safety check: Global rules must have a domain to prevent pollution
+  if (!memory.domain && !forcePromote) {
+    throw new Error(
+      "Cannot promote domain-less rule to global scope. It would apply to ALL projects. " +
+      "Set a domain first or use force=true."
+    );
+  }
+
+  const stmt = ctx.db.prepare(`
+    UPDATE memories 
+    SET project_id = NULL, updated_at = ? 
+    WHERE id = ?
+    RETURNING *
+  `);
+  
+  return stmt.get(Date.now(), memoryId) as Memory;
+}
+
+export function demoteMemory(
+  ctxOrId: SemanthiccContext | number,
+  idOrProjectId?: number,
+  targetProjectId?: number
+): Memory | null {
+  let ctx: SemanthiccContext;
+  let memoryId: number;
+  let projectId: number;
+
+  if (typeof ctxOrId === "number") {
+    ctx = getLegacyContext();
+    memoryId = ctxOrId;
+    projectId = idOrProjectId!;
+  } else {
+    ctx = ctxOrId;
+    memoryId = idOrProjectId!;
+    projectId = targetProjectId!;
+  }
+
+  const memory = getMemory(ctx, memoryId);
+  if (!memory) return null;
+  
+  if (memory.project_id === projectId) return memory;
+
+  const stmt = ctx.db.prepare(`
+    UPDATE memories 
+    SET project_id = ?, updated_at = ? 
+    WHERE id = ?
+    RETURNING *
+  `);
+  
+  return stmt.get(projectId, Date.now(), memoryId) as Memory;
+}

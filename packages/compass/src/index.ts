@@ -1,0 +1,410 @@
+import type { Plugin, PluginInput } from "@opencode-ai/plugin";
+import { tool } from "@opencode-ai/plugin";
+import { getOrCreateProject } from "./hooks/auto-register";
+import { getHeuristicsContext } from "./hooks/heuristics-injector";
+import { createPassiveLearner } from "./hooks/passive-learner";
+import { isToolError } from "./hooks/error-detect";
+import { addMemory, deleteMemory, listMemories, supersedeMemory, archiveMemory, promoteMemory, demoteMemory } from "./heuristics";
+import { exportMemories, importMemories } from "./heuristics/transfer";
+import { detectHistoryIntent } from "./heuristics/intent";
+import { indexProject, getIndexStats, indexTempPath } from "./indexer";
+import { searchCode, formatSearchResultsForTool, searchTempPath, searchMultipleProjects } from "./search";
+import { getStatus, formatStatus, getPathStatus, formatPathStatus } from "./status";
+import { findProjectByPath, getProjectById, listProjects } from "./hooks/project-detect";
+import { isTempIndexed } from "./lance/temp-index";
+import { startDashboard, stopDashboard, getDashboardPort } from "./dashboard/server";
+import { readFileSync, writeFileSync } from "node:fs";
+import { join, isAbsolute } from "node:path";
+import { loadConfig } from "./config";
+import { setEmbeddingConfig } from "./embeddings/embed";
+import { exec } from "node:child_process";
+import { log } from "./logger";
+
+export type * from "./types";
+
+export const SemanthiccPlugin: Plugin = async (ctx: PluginInput) => {
+  const { directory } = ctx;
+  const project = getOrCreateProject(directory);
+  const config = loadConfig(directory);
+
+  if (config.embedding) {
+    setEmbeddingConfig(config.embedding);
+    log.api.info(`Initialized embedding config: ${config.embedding.provider}`);
+  }
+
+  log.api.info(`Plugin started for directory: ${directory}`);
+  log.api.info(`Project detected: ${project ? `id=${project.id}, name=${project.name}` : 'null'}`);
+
+  const isTestEnv = process.env.NODE_ENV === "test" || process.env.BUN_ENV === "test" || typeof Bun !== "undefined" && Bun.env.BUN_TEST === "1";
+  
+  if (config.dashboard === "auto" && !isTestEnv) {
+    const result = startDashboard(config.port || 4567, project?.id ?? null);
+    log.api.info(`Dashboard started with projectId=${project?.id ?? null}`);
+    if (result.port) {
+      const url = `http://localhost:${result.port}`;
+      const startCmd = process.platform === "win32" ? "start" : process.platform === "darwin" ? "open" : "xdg-open";
+      exec(`${startCmd} ${url}`);
+    }
+  }
+  
+  const sessionLearners = new Map<string, ReturnType<typeof createPassiveLearner>>();
+  
+  function getLearner(sessionID: string) {
+    let learner = sessionLearners.get(sessionID);
+    if (!learner) {
+      learner = createPassiveLearner(project?.id ?? null, sessionID);
+      sessionLearners.set(sessionID, learner);
+    }
+    return learner;
+  }
+
+  // Ensure dashboard server stops when plugin/process exits
+  process.on("exit", () => stopDashboard());
+  
+  return {
+    name: "semanthicc",
+
+    "tool.execute.after": async (
+      input: { tool: string; sessionID: string; callID: string },
+      output: { title: string; output: string; metadata: unknown }
+    ) => {
+      try {
+        if (!output) return;
+        
+        const isError = isToolError(output.output, output.title);
+        const learner = getLearner(input.sessionID);
+        
+        learner.handleToolOutcome(
+          { tool: { name: input.tool, parameters: {} } },
+          { content: output.output, isError }
+        );
+      } catch (error) {
+        console.error("Semanthicc: Error in tool.execute.after hook", error);
+      }
+    },
+
+    "chat.params": async (params: Record<string, unknown>) => {
+      try {
+        const input = params.input as Record<string, unknown> | undefined;
+        if (!input) return;
+
+        let userQuery: string | undefined;
+        if (Array.isArray(input.messages)) {
+          const lastMsg = input.messages[input.messages.length - 1];
+          if (lastMsg && typeof lastMsg === 'object' && lastMsg.role === 'user' && typeof lastMsg.content === 'string') {
+            userQuery = lastMsg.content;
+          }
+        }
+
+        const project = getOrCreateProject(directory);
+        const heuristicsContext = getHeuristicsContext(project?.id ?? null, userQuery);
+
+        if (heuristicsContext) {
+          const existingSystemPrompt = (input.systemPrompt as string) || "";
+          input.systemPrompt = existingSystemPrompt + "\n\n" + heuristicsContext;
+        }
+      } catch (error) {
+        console.error("Semanthicc: Error in chat.params hook", error);
+      }
+    },
+
+    "experimental.chat.system.transform": async (
+      _input: { agent?: string },
+      output: { system: string[] }
+    ) => {
+      try {
+        const project = getOrCreateProject(directory);
+        const heuristicsContext = getHeuristicsContext(project?.id ?? null);
+
+        if (heuristicsContext && !output.system.some(s => s.includes("<project-heuristics>"))) {
+          output.system.push(heuristicsContext);
+        }
+      } catch (error) {
+        console.error("Semanthicc: Error in system.transform hook", error);
+      }
+    },
+
+    tool: {
+      semanthicc: tool({
+        description: `Semantic code search and memory management. Actions: search, index, status, remember, forget, list, supersede, failure-fixed, promote, demote, import, export, dashboard.
+
+SEARCH QUERY TIPS for better results:
+- Use CODE terminology, not concept names: "function that converts config" > "captain manager"
+- Describe WHAT code does: "applies tool profile to enable disable" > "tool activation"
+- Include technical terms: "async function validates JWT token" > "auth check"
+- Code queries find .ts/.js files; prose queries find docs
+- If results are mostly docs, rephrase with function/class descriptions
+
+CROSS-PROJECT & ARBITRARY PATH SEARCH:
+- Check if a path is indexed: status --path="/repos/dependency"
+- Index an external path: index --path="/repos/dependency" (creates temp index)
+- Search external path: search "query" --path="/repos/dependency"
+- Search multiple projects: search "query" --projects=1,2,3 (comma-separated IDs)
+- Results include [ProjectName] prefix for attribution`,
+        args: {
+          action: tool.schema
+            .enum(["search", "index", "status", "remember", "forget", "list", "supersede", "failure-fixed", "promote", "demote", "import", "export", "dashboard"])
+            .describe("Action to perform"),
+          query: tool.schema
+            .string()
+            .describe("Search query (use code terminology: 'function that parses X' not 'X handler'), or content to remember, or file path for import/export")
+            .optional(),
+          type: tool.schema
+            .enum(["pattern", "decision", "constraint", "learning", "context", "rule"])
+            .describe("Type of memory (for remember action)")
+            .optional(),
+          domain: tool.schema
+            .string()
+            .describe("Domain tag (e.g., typescript, testing)")
+            .optional(),
+          global: tool.schema
+            .boolean()
+            .describe("Make this a global memory (applies to all projects)")
+            .optional(),
+          id: tool.schema
+            .number()
+            .describe("Memory ID (for forget/promote/demote actions)")
+            .optional(),
+          limit: tool.schema
+            .number()
+            .describe("Max results (default 5)")
+            .optional(),
+          includeHistory: tool.schema
+            .boolean()
+            .describe("Include superseded memories in list results")
+            .optional(),
+          force: tool.schema
+            .boolean()
+            .describe("Force action (e.g. promote without domain)")
+            .optional(),
+          focus: tool.schema
+            .enum(["code", "docs", "tests", "mixed"])
+            .describe("Search focus: 'code' filters to source files (use technical/code-style queries like function names, not natural language), 'docs' filters to markdown, 'tests' filters to spec files, 'mixed' searches all")
+            .optional(),
+          path: tool.schema
+            .string()
+            .describe("Arbitrary path to search/index. If path matches a registered project, uses that. Otherwise creates a temporary index.")
+            .optional(),
+          projects: tool.schema
+            .string()
+            .describe("Comma-separated project IDs for cross-project search (e.g., '1,2,3'). Results are merged and attributed to source project.")
+            .optional(),
+          temp: tool.schema
+            .boolean()
+            .describe("For index action with --path: create temporary index (discarded after session). Default true for unregistered paths.")
+            .optional(),
+        },
+        async execute(args) {
+          const { action, query, type, domain, global: isGlobal, id, limit = 5, includeHistory, force, focus, path: targetPath, projects: projectsArg, temp } = args;
+          const project = getOrCreateProject(directory);
+
+          switch (action) {
+            case "search": {
+              if (!query) {
+                return "Error: Query is required for search";
+              }
+              
+              if (projectsArg) {
+                const projectIds = projectsArg.split(",").map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n));
+                if (projectIds.length === 0) {
+                  return "Error: Invalid projects format. Use comma-separated IDs: --projects=1,2,3";
+                }
+                
+                const projectNames = new Map<number, string>();
+                for (const id of projectIds) {
+                  const p = getProjectById(id);
+                  if (p) {
+                    projectNames.set(id, p.name ?? `Project ${id}`);
+                  }
+                }
+                
+                const results = await searchMultipleProjects(query, projectIds, projectNames, { limit, focus });
+                const header = `[Cross-project search: ${projectIds.map(id => projectNames.get(id) || id).join(", ")}]\n`;
+                return header + formatSearchResultsForTool(results);
+              }
+              
+              if (targetPath) {
+                const existingProject = findProjectByPath(targetPath);
+                if (existingProject) {
+                  const results = await searchCode(query, existingProject.id, { limit, focus });
+                  return `[Project: ${existingProject.name}]\n${formatSearchResultsForTool(results)}`;
+                } else if (isTempIndexed(targetPath)) {
+                  const results = await searchTempPath(query, targetPath, { limit, focus });
+                  return `[Temp: ${targetPath}]\n${formatSearchResultsForTool(results)}`;
+                } else {
+                  return `Error: Path "${targetPath}" is not indexed.\nRun: semanthicc index --path="${targetPath}"`;
+                }
+              }
+              
+              if (!project) {
+                return "Error: Not in a git repository. Run 'index' action from within a git project.";
+              }
+              const stats = await getIndexStats(project.id);
+              if (stats.chunkCount === 0) {
+                return "Error: Project not indexed. Run 'index' action first.";
+              }
+              const results = await searchCode(query, project.id, { limit, focus });
+              return formatSearchResultsForTool(results);
+            }
+
+            case "index": {
+              if (targetPath) {
+                const existingProject = findProjectByPath(targetPath);
+                if (existingProject) {
+                  const result = await indexProject(existingProject.path, {
+                    projectName: existingProject.name ?? undefined,
+                  });
+                  return `Indexed project "${existingProject.name}" (id=${existingProject.id}): ${result.filesIndexed} files, ${result.chunksCreated} chunks in ${result.durationMs}ms`;
+                } else {
+                  const result = await indexTempPath(targetPath);
+                  return `Temporary index created for ${targetPath}: ${result.filesIndexed} files, ${result.chunksCreated} chunks in ${result.durationMs}ms\nTemp ID: ${result.tempId}\nNote: This is a temporary index. Use semanthicc search --path="${targetPath}" to search it.`;
+                }
+              }
+              const result = await indexProject(directory, {
+                projectName: directory.split(/[/\\]/).pop(),
+              });
+              return `Indexed ${result.filesIndexed} files, created ${result.chunksCreated} chunks in ${result.durationMs}ms`;
+            }
+
+            case "status": {
+              if (targetPath) {
+                const pathStatus = getPathStatus(targetPath);
+                return formatPathStatus(pathStatus);
+              }
+              const status = getStatus(project?.id ?? null);
+              return formatStatus(status);
+            }
+
+            case "remember": {
+              if (!query) {
+                return "Error: Content is required for remember";
+              }
+              const memory = addMemory({
+                content: query,
+                concept_type: (type as "pattern" | "decision" | "constraint" | "learning" | "context" | "rule") ?? "pattern",
+                domain,
+                project_id: isGlobal ? null : project?.id ?? null,
+              });
+              return `Memory saved with ID ${memory.id}. ${isGlobal ? "(global)" : "(project-specific)"}`;
+            }
+
+            case "forget": {
+              if (!id) {
+                return "Error: Memory ID is required for forget";
+              }
+              const deleted = deleteMemory(id);
+              return deleted ? `Memory ${id} deleted.` : `Memory ${id} not found.`;
+            }
+
+            case "list": {
+              const shouldIncludeHistory = includeHistory || (query ? detectHistoryIntent(query) : false);
+              const memories = listMemories({
+                projectId: project?.id ?? null,
+                domain,
+                limit,
+                includeHistory: shouldIncludeHistory,
+              });
+              if (memories.length === 0) {
+                return shouldIncludeHistory ? "No memories found (including history)." : "No memories found.";
+              }
+              const header = shouldIncludeHistory ? "[Including history]\n" : "";
+              return header + memories
+                .map((m) => {
+                  const scope = m.project_id === null ? "[global]" : "";
+                  const golden = m.is_golden ? "⭐" : "";
+                  const status = m.status !== "current" ? `[${m.status}]` : "";
+                  return `${golden}${scope}${status} [${m.effectiveConfidence.toFixed(2)}] ${m.concept_type}: ${m.content}`;
+                })
+                .join("\n");
+            }
+
+            case "supersede": {
+              if (!id) {
+                return "Error: Memory ID (id) is required for supersede";
+              }
+              if (!query) {
+                return "Error: New content (query) is required for supersede";
+              }
+              const result = supersedeMemory(id, query);
+              if (!result) {
+                return `Error: Memory ${id} not found or already superseded`;
+              }
+              return `Superseded memory ${id} with new memory ${result.new.id}.\nOld: ${result.old.content}\nNew: ${result.new.content}`;
+            }
+
+            case "promote": {
+              if (!id) {
+                return "Error: Memory ID (id) is required for promote";
+              }
+              try {
+                const result = promoteMemory(id, force);
+                if (!result) return `Error: Memory ${id} not found`;
+                if (result.project_id === null) return `Memory ${id} is already global.`;
+                return `Promoted memory ${id} to global scope.`;
+              } catch (e) {
+                return `Error: ${e instanceof Error ? e.message : String(e)}`;
+              }
+            }
+
+            case "demote": {
+              if (!id) {
+                return "Error: Memory ID (id) is required for demote";
+              }
+              if (!project) {
+                return "Error: Not in a project context. Cannot demote to unknown project.";
+              }
+              const result = demoteMemory(id, project.id);
+              if (!result) return `Error: Memory ${id} not found`;
+              if (result.project_id === project.id) return `Memory ${id} is already scoped to this project.`;
+              return `Demoted memory ${id} to project '${project.name}'.`;
+            }
+
+            case "export": {
+              const json = exportMemories(project?.id ?? null);
+              if (query) {
+                const filePath = isAbsolute(query) ? query : join(directory, query);
+                writeFileSync(filePath, json);
+                return `Exported memories to ${filePath}`;
+              }
+              return json;
+            }
+
+            case "import": {
+              if (!query) {
+                return "Error: File path or JSON content (query) is required for import";
+              }
+              let json = query;
+              if (query.endsWith(".json") || query.includes("/") || query.includes("\\")) {
+                const filePath = isAbsolute(query) ? query : join(directory, query);
+                try {
+                  json = readFileSync(filePath, "utf-8");
+                } catch {
+                  // Fallback to treating query as raw JSON
+                }
+              }
+              
+              const result = importMemories(project?.id ?? null, json);
+              if (result.errors.length > 0) {
+                return `Imported ${result.added} memories. Skipped ${result.skipped} duplicates.\nErrors:\n${result.errors.join("\n")}`;
+              }
+              return `Successfully imported ${result.added} memories. Skipped ${result.skipped} duplicates.`;
+            }
+
+            case "dashboard": {
+              if (query === "stop") {
+                return stopDashboard();
+              }
+              const result = startDashboard(4567, project?.id ?? null);
+              return result.message;
+            }
+
+            default:
+              return `Error: Unknown action: ${action}`;
+          }
+        },
+      }),
+    },
+  };
+};
+
+export default SemanthiccPlugin;
