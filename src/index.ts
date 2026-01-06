@@ -46,6 +46,9 @@ import {
 } from './rules';
 import type { Rule } from './rules';
 
+// Captain Tool imports
+import { discoverToolsForWorkflow, createCaptainTool } from './captain-tool';
+
 // Crew module imports
 import {
   loadCrews,
@@ -512,10 +515,33 @@ export const WorkflowsPlugin: Plugin = async (ctx: PluginInput) => {
             return `Workflow "${args.name}" not found.\n\nAvailable: ${availableStr}\n\nHint: Create .md files in ~/.config/opencode/workflows/ or .opencode/workflows/`;
           }
 
-          const folderInfo = workflow.folder ? `\nFolder: ${workflow.folder}` : '';
-          return `# Workflow: //${workflow.name}\nSource: ${workflow.source}${folderInfo}\nPath: ${workflow.path}\n\n${workflow.content}`;
+const folderInfo = workflow.folder ? `\nFolder: ${workflow.folder}` : '';
+          
+          const tools = discoverToolsForWorkflow(directory, workflow.name);
+          let toolsSection = '';
+          if (tools.length > 0) {
+            const toolLines = tools.map((t) => `- \`captain_tool("${t.path}", {...})\` — ${t.name}`);
+            toolsSection = `\n\n## Available Tools\n${toolLines.join('\n')}`;
+          }
+          
+return `# Workflow: //${workflow.name}\nSource: ${workflow.source}${folderInfo}\nPath: ${workflow.path}\n\n${workflow.content}${toolsSection}`;
         },
     }),
+
+      captain_tool: (() => {
+        const captainTool = createCaptainTool(directory);
+        return tool({
+          description: captainTool.description,
+          args: {
+            tool: tool.schema.string().describe("Tool path: 'category/tool' or 'category/workflow/tool'"),
+            params: tool.schema.record(tool.schema.string(), tool.schema.unknown()).optional().describe('Parameters to pass to the tool'),
+          },
+          async execute(args) {
+            const result = await captainTool.execute({ tool: args.tool, params: args.params ?? {} });
+            return typeof result === 'string' ? result : JSON.stringify(result, null, 2);
+          },
+        });
+      })(),
     },
   };
 };

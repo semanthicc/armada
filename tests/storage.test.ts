@@ -97,14 +97,14 @@ description: "Categorized workflow"
 
   test('subfolder workflows have folder metadata', () => {
     const workflows = loadWorkflows(testProjectDir);
-    const subWf = workflows.get('test-sub-wf');
+    const subWf = workflows.get('category/test-sub-wf');
     expect(subWf).toBeDefined();
     expect(subWf?.folder).toBe('category');
   });
 
   test('subfolder workflows have correct path', () => {
     const workflows = loadWorkflows(testProjectDir);
-    const subWf = workflows.get('test-sub-wf');
+    const subWf = workflows.get('category/test-sub-wf');
     expect(subWf?.path).toContain('category');
   });
 });

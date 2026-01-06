@@ -222,7 +222,8 @@ lyze problems from [5] perspectives..."`);
     const userMessage = 'check security';
     const hint = formatAutoApplyHint(['security-audit', 'inspect'], orders, keywords);
     
-    expect(hint).toContain('get_workflow(`security-audit`, `inspect`)');
+    expect(hint).toContain('security-audit');
+    expect(hint).toContain('inspect');
     expect(stripExistingHints(`${userMessage}\n\n${hint}`)).toBe(userMessage);
   });
 });

@@ -132,7 +132,8 @@ export function loadPrompts<T extends BasePrompt>(
     try {
       const files = walkDir(dir);
       for (const { filePath, folder } of files) {
-        const name = basename(filePath, '.md');
+        const baseName = basename(filePath, '.md');
+        const name = folder ? `${folder}/${baseName}`.replace(/\\/g, '/') : baseName;
         if (!prompts.has(name)) {
           const rawContent = readFileSync(filePath, 'utf-8');
           const prompt = parser(name, rawContent, source, filePath, folder);
