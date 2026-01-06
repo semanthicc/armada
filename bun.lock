@@ -11,10 +11,6 @@
     "apps/dashboard": {
       "name": "@semanthicc/dashboard",
       "version": "0.1.0",
-      "dependencies": {
-        "@semanthicc/captain": "workspace:*",
-        "@semanthicc/compass": "workspace:*",
-      },
       "devDependencies": {
         "@sveltejs/adapter-auto": "^7.0.0",
         "@sveltejs/kit": "^2.49.1",
@@ -64,6 +60,17 @@
         "typescript": "^5",
       },
     },
+    "packages/config": {
+      "name": "@semanthicc/config",
+      "version": "0.1.0",
+      "dependencies": {
+        "@semanthicc/types": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+        "typescript": "^5",
+      },
+    },
     "packages/shared": {
       "name": "@semanthicc/shared",
       "version": "0.1.0",
@@ -71,6 +78,10 @@
         "@types/bun": "latest",
         "typescript": "^5",
       },
+    },
+    "packages/types": {
+      "name": "@semanthicc/types",
+      "version": "0.1.0",
     },
   },
   "packages": {
@@ -240,9 +251,13 @@
 
     "@semanthicc/compass": ["@semanthicc/compass@workspace:packages/compass"],
 
+    "@semanthicc/config": ["@semanthicc/config@workspace:packages/config"],
+
     "@semanthicc/dashboard": ["@semanthicc/dashboard@workspace:apps/dashboard"],
 
     "@semanthicc/shared": ["@semanthicc/shared@workspace:packages/shared"],
+
+    "@semanthicc/types": ["@semanthicc/types@workspace:packages/types"],
 
     "@standard-schema/spec": ["@standard-schema/spec@1.1.0", "", {}, "sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w=="],
 

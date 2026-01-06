@@ -6,7 +6,7 @@ import type {
   LegacyCaptainConfig,
   CompassConfig,
   CaptainConfig
-} from './index';
+} from '@semanthicc/types';
 
 function expandHome(filepath: string): string {
   if (filepath.startsWith('~')) {
@@ -20,7 +20,8 @@ function readJsonSafe<T>(filepath: string): T | null {
     const expanded = expandHome(filepath);
     const file = Bun.file(expanded);
     if (!file.size) return null;
-    return JSON.parse(file.toString()) as T;
+    const content = file.toString();
+    return JSON.parse(content) as T;
   } catch {
     return null;
   }
@@ -152,3 +153,5 @@ export async function isPluginEnabled(pluginId: 'compass' | 'captain', projectPa
   
   return false;
 }
+
+export type { SemanthiccConfig, CompassConfig, CaptainConfig } from '@semanthicc/types';
