@@ -1,5 +1,5 @@
 {
-  "name": "opencode-semanthicc",
+  "name": "@semanthicc/compass",
   "version": "1.6.0",
   "description": "Semantic memory and heuristics for OpenCode - least tokens, most mistake prevention",
   "module": "src/index.ts",

@@ -1,5 +1,5 @@
 {
-  "name": "opencode-captain",
+  "name": "@semanthicc/captain",
   "version": "1.5.0",
   "description": "Captain your AI with Orders (//workflows), Rules (silent constraints), and Crews (agent definitions)",
   "type": "module",
