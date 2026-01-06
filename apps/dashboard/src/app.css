@@ -1,0 +1,20 @@
+@import 'tailwindcss';
+
+/* Custom semantic elements for layout - following Svelte5 patterns */
+@layer base {
+  /* Structural elements */
+  nav-shell { @apply block; }
+  main-content { @apply block; }
+  plugin-view { @apply block; }
+  
+  /* Interactive elements - style on native HTML */
+  button.nav-btn {
+    @apply flex items-center gap-2 px-3 py-2 rounded-lg 
+           text-sm font-medium transition-colors
+           hover:bg-gray-100 dark:hover:bg-gray-800;
+  }
+  
+  button.nav-btn.active {
+    @apply bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300;
+  }
+}

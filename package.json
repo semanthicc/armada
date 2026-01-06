@@ -1,0 +1,19 @@
+{
+  "name": "semanthicc-armada",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "bun --filter '@semanthicc/dashboard' dev",
+    "dev:all": "bun --filter '*' dev",
+    "build": "bun --filter '*' build",
+    "build:compass": "bun --filter '@semanthicc/compass' build",
+    "build:captain": "bun --filter '@semanthicc/captain' build",
+    "build:dashboard": "bun --filter '@semanthicc/dashboard' build"
+  },
+  "devDependencies": {
+    "typescript": "^5"
+  }
+}
