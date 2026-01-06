@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { appState } from '../stores';
+  import { compassState } from '../stores.svelte';
   import { searchAction } from '../actions';
 </script>
 
@@ -8,18 +8,18 @@
   <search-box>
     <input 
       type="text" 
-      bind:value={appState.searchQuery} 
+      bind:value={compassState.searchQuery} 
       placeholder="Search code..." 
       onkeydown={(e) => e.key === 'Enter' && searchAction()}
     />
-    <button class="action-btn" onclick={searchAction} disabled={appState.searchLoading}>Search</button>
+    <button class="action-btn" onclick={searchAction} disabled={compassState.searchLoading}>Search</button>
   </search-box>
 
-  {#if appState.searchLoading}
+  {#if compassState.searchLoading}
     <status-message>Searching...</status-message>
-  {:else if appState.searchResults.length > 0}
+  {:else if compassState.searchResults.length > 0}
     <result-list>
-      {#each appState.searchResults as r}
+      {#each compassState.searchResults as r}
         <result-item>
           <result-header>
             <result-file>{r.filePath}</result-file>

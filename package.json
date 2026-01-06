@@ -11,7 +11,11 @@
     "build": "bun --filter '*' build",
     "build:compass": "bun --filter '@semanthicc/compass' build",
     "build:captain": "bun --filter '@semanthicc/captain' build",
-    "build:dashboard": "bun --filter '@semanthicc/dashboard' build"
+    "build:dashboard": "bun --filter '@semanthicc/dashboard' build",
+    "check": "bun --filter '*' check",
+    "check:dashboard": "bun --filter '@semanthicc/dashboard' check",
+    "typecheck": "tsc --noEmit",
+    "lint": "bun --filter '*' lint"
   },
   "devDependencies": {
     "typescript": "^5"

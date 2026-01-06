@@ -1,11 +1,11 @@
 import type { 
   Memory, SearchResult, EmbeddingConfig, StatusResponse, 
-  Project, IndexCoverage, Toast 
-} from '../types';
+  Project 
+} from './types';
 
-export type { Memory, SearchResult, EmbeddingConfig, StatusResponse, Project, IndexCoverage, Toast };
+export type { Memory, SearchResult, EmbeddingConfig, StatusResponse, Project };
 
-export const appState = $state({
+export const compassState = $state({
   status: null as StatusResponse | null,
   loading: true,
   error: null as string | null,
@@ -35,7 +35,7 @@ export const appState = $state({
 });
 
 export function getCurrentProject() {
-  return appState.projects.find(p => p.id === appState.selectedProjectId);
+  return compassState.projects.find(p => p.id === compassState.selectedProjectId);
 }
 
 export function getCurrentAutoIndex() {

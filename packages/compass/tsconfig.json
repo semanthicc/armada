@@ -14,7 +14,7 @@
     "noEmit": true,
 
     // Type declarations for bun
-    "types": ["bun-types"],
+    "types": ["@types/bun"],
 
     // Best practices
     "strict": true,

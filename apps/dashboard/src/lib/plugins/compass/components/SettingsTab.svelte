@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { appState } from '../stores';
+  import { compassState } from '../stores.svelte';
   import { loadConfigAction, saveConfigAction } from '../actions';
 
   let message = $state<{ text: string; type: 'success' | 'error' } | null>(null);
@@ -28,16 +28,16 @@
   
   <form-field>
     <field-label>Provider</field-label>
-    <select bind:value={appState.embeddingConfig.provider}>
+    <select bind:value={compassState.embeddingConfig.provider}>
       <option value="gemini">Google Gemini</option>
       <option value="local">Local (Transformers.js)</option>
     </select>
   </form-field>
 
-  {#if appState.embeddingConfig.provider === 'gemini'}
+  {#if compassState.embeddingConfig.provider === 'gemini'}
     <form-field>
       <field-label>Model</field-label>
-      <select bind:value={appState.embeddingConfig.geminiModel}>
+      <select bind:value={compassState.embeddingConfig.geminiModel}>
         <option value="text-embedding-004">text-embedding-004</option>
         <option value="embedding-001">embedding-001</option>
       </select>
@@ -45,16 +45,16 @@
 
     <form-field>
       <field-label>Dimensions (optional)</field-label>
-      <input type="number" bind:value={appState.embeddingConfig.dimensions} placeholder="Auto" min="1" max="3072" />
+      <input type="number" bind:value={compassState.embeddingConfig.dimensions} placeholder="Auto" min="1" max="3072" />
       <field-hint>Leave empty for model default. Lower values = smaller index size.</field-hint>
     </form-field>
 
     <form-field>
-      <field-label>API Key {appState.embeddingConfig.hasApiKey ? '(configured)' : ''}</field-label>
+      <field-label>API Key {compassState.embeddingConfig.hasApiKey ? '(configured)' : ''}</field-label>
       <input 
         type="password" 
-        bind:value={appState.geminiApiKey} 
-        placeholder={appState.embeddingConfig.hasApiKey ? '••••••••' : 'Enter API Key'} 
+        bind:value={compassState.geminiApiKey} 
+        placeholder={compassState.embeddingConfig.hasApiKey ? '••••••••' : 'Enter API Key'} 
       />
       <field-hint>Leave blank to keep existing key.</field-hint>
     </form-field>

@@ -1,7 +1,7 @@
 import type { 
   Memory, SearchResult, EmbeddingConfig, StatusResponse, 
   Project 
-} from '../types';
+} from './types';
 
 export function buildApiUrl(path: string, projectId: number | null): string {
   if (!projectId) return path;

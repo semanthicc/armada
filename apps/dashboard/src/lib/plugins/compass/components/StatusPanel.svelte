@@ -1,13 +1,13 @@
 <script lang="ts">
-  import type { StatusResponse } from '../../types';
-  import { appState, getCurrentProject } from '../stores';
+  import type { StatusResponse } from '../types';
+  import { compassState, getCurrentProject } from '../stores.svelte';
   import { toggleAutoIndex, loadStatus } from '../actions';
   import { indexProject as apiIndexProject, deleteIndex as apiDeleteIndex, stopIndex as apiStopIndex, type IndexProgressEvent } from '../api';
 
-  let projectId = $derived(appState.selectedProjectId);
-  let status = $derived(appState.status!);
+  let projectId = $derived(compassState.selectedProjectId);
+  let status = $derived(compassState.status!);
   let autoIndex = $derived(getCurrentProject()?.auto_index ?? false);
-  let embeddingWarning = $derived(appState.status?.embeddingWarning);
+  let embeddingWarning = $derived(compassState.status?.embeddingWarning);
 
   let indexing = $state(false);
   let deletingIndex = $state(false);

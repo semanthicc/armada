@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { appState } from '../stores';
+  import { compassState } from '../stores.svelte';
   import { selectProject } from '../actions';
 
   function handleChange(event: Event) {
@@ -10,9 +10,9 @@
 </script>
 
 <project-selector>
-  <select value={appState.selectedProjectId} onchange={handleChange}>
+  <select value={compassState.selectedProjectId} onchange={handleChange}>
     <option value="">Global</option>
-    {#each appState.projects as p}
+    {#each compassState.projects as p}
       <option value={p.id}>{p.name} ({p.chunk_count} chunks)</option>
     {/each}
   </select>

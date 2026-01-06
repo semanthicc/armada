@@ -13,27 +13,17 @@
     }
   },
   "scripts": {
-    "build": "bun run build:dashboard && bun run build:main",
+    "build": "bun run build:main",
     "build:main": "bun build src/index.ts --outdir dist --target bun --external @xenova/transformers",
-    "build:dashboard": "cd src/dashboard/ui && vite build",
-    "build:all": "bun run check:all && bun run build",
     "test": "bun test src/",
     "dev": "bun run src/index.ts",
-    "dashboard:dev": "cd src/dashboard/ui && vite dev --host",
     "check": "tsc --noEmit",
-    "check:all": "bun run check && bun run check:dashboard && bun run check:build",
-    "check:dashboard": "cd src/dashboard/ui && bunx svelte-check --tsconfig ./tsconfig.json",
-    "check:build": "cd src/dashboard/ui && vite build --mode development",
     "typecheck": "tsc --noEmit",
-    "typecheck:dashboard": "cd src/dashboard/ui && svelte-check",
-    "ci": "bun run check:all && bun run build && bun run test"
+    "ci": "bun run check && bun run build && bun run test"
   },
   "devDependencies": {
     "@types/bun": "latest",
-    "typescript": "^5.9.3",
-    "vite": "^5.4.21",
-    "svelte": "^5.46.1",
-    "@sveltejs/vite-plugin-svelte": "^4.0.4"
+    "typescript": "^5.9.3"
   },
   "peerDependencies": {
     "typescript": "^5"

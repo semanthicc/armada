@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { appState } from '../stores';
+  import { compassState } from '../stores.svelte';
   import { 
     loadMemories, 
     purgeDuplicates, 
@@ -7,16 +7,16 @@
     deleteMemoryAction, 
     restoreMemoryAction 
   } from '../actions';
-  import type { Memory } from '../../types';
+  import type { Memory } from '../types';
 
   let dialogEl = $state<HTMLDialogElement | null>(null);
   let toastTimeout: ReturnType<typeof setTimeout> | null = null;
 
   // Open/close dialog when editingMemory changes
   $effect(() => {
-    if (appState.editingMemory && dialogEl) {
+    if (compassState.editingMemory && dialogEl) {
       dialogEl.showModal();
-    } else if (!appState.editingMemory && dialogEl?.open) {
+    } else if (!compassState.editingMemory && dialogEl?.open) {
       dialogEl.close();
     }
   });
@@ -24,19 +24,19 @@
   // Handle backdrop click (click on dialog element itself, not content)
   function handleDialogClick(e: MouseEvent) {
     if (e.target === e.currentTarget) {
-      appState.editingMemory = null;
+      compassState.editingMemory = null;
     }
   }
 
-  let filteredMemories = $derived(appState.memories.filter(m => {
-    if (appState.filter === 'all') return true;
-    if (appState.filter === 'project') return m.project_id !== null;
-    if (appState.filter === 'global') return m.project_id === null;
+  let filteredMemories = $derived(compassState.memories.filter(m => {
+    if (compassState.filter === 'all') return true;
+    if (compassState.filter === 'project') return m.project_id !== null;
+    if (compassState.filter === 'global') return m.project_id === null;
     return true;
   }));
 
   function startEdit(m: Memory) {
-    appState.editingMemory = { ...m };
+    compassState.editingMemory = { ...m };
   }
 
   // Load memories on mount
@@ -49,18 +49,18 @@
   <mem-header>
     <card-title>Memories</card-title>
     <filter-group>
-      <button class="filter-btn" class:active={appState.filter === 'all'} onclick={() => appState.filter = 'all'}>All</button>
-      <button class="filter-btn" class:active={appState.filter === 'project'} onclick={() => appState.filter = 'project'}>Project Only</button>
-      <button class="filter-btn" class:active={appState.filter === 'global'} onclick={() => appState.filter = 'global'}>Global Only</button>
+      <button class="filter-btn" class:active={compassState.filter === 'all'} onclick={() => compassState.filter = 'all'}>All</button>
+      <button class="filter-btn" class:active={compassState.filter === 'project'} onclick={() => compassState.filter = 'project'}>Project Only</button>
+      <button class="filter-btn" class:active={compassState.filter === 'global'} onclick={() => compassState.filter = 'global'}>Global Only</button>
     </filter-group>
-    {#if appState.duplicatesCount > 0}
+    {#if compassState.duplicatesCount > 0}
       <button class="action-btn purge" onclick={purgeDuplicates}>
-        Purge Duplicates ({appState.duplicatesCount})
+        Purge Duplicates ({compassState.duplicatesCount})
       </button>
     {/if}
   </mem-header>
   
-  {#if appState.memoriesLoading}
+  {#if compassState.memoriesLoading}
     <status-message>Loading memories...</status-message>
   {:else}
     <mem-list>
@@ -89,18 +89,18 @@
     onclick={handleDialogClick}
   >
     <form class="modal-content" method="dialog">
-      <card-title id="modal-title">Edit Memory #{appState.editingMemory?.id}</card-title>
+      <card-title id="modal-title">Edit Memory #{compassState.editingMemory?.id}</card-title>
       
-      {#if appState.editingMemory}
+      {#if compassState.editingMemory}
       <form-field>
         <field-label>Content</field-label>
-        <textarea bind:value={appState.editingMemory.content} rows="3"></textarea>
+        <textarea bind:value={compassState.editingMemory.content} rows="3"></textarea>
       </form-field>
 
       <form-row>
         <form-field>
           <field-label>Type</field-label>
-          <select bind:value={appState.editingMemory.concept_type}>
+          <select bind:value={compassState.editingMemory.concept_type}>
             <option value="pattern">Pattern</option>
             <option value="rule">Rule</option>
             <option value="constraint">Constraint</option>
@@ -112,24 +112,24 @@
 
         <form-field>
           <field-label>Domain</field-label>
-          <input type="text" bind:value={appState.editingMemory.domain} />
+          <input type="text" bind:value={compassState.editingMemory.domain} />
         </form-field>
 
         <form-field>
           <field-label>Confidence</field-label>
-          <input type="number" step="0.01" min="0" max="1" bind:value={appState.editingMemory.confidence} />
+          <input type="number" step="0.01" min="0" max="1" bind:value={compassState.editingMemory.confidence} />
         </form-field>
       </form-row>
       {/if}
 
       <modal-actions>
-        <button class="action-btn" onclick={() => appState.editingMemory = null}>Cancel</button>
+        <button class="action-btn" onclick={() => compassState.editingMemory = null}>Cancel</button>
         <button class="action-btn primary" onclick={saveMemoryAction}>Save</button>
       </modal-actions>
     </form>
   </dialog>
 
-{#if appState.toast.visible}
+{#if compassState.toast.visible}
   <toast-notification>
     <span>Memory deleted.</span>
     <button class="action-btn undo" onclick={restoreMemoryAction}>Undo</button>
