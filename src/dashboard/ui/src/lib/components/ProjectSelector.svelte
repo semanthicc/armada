@@ -1,25 +1,18 @@
 <script lang="ts">
-  import type { Project } from '../../types';
-
-  interface Props {
-    projects: Project[];
-    selectedProjectId: number | null;
-    onProjectChange: (projectId: number | null) => void;
-  }
-
-  let { projects, selectedProjectId, onProjectChange }: Props = $props();
+  import { appState } from '../stores';
+  import { selectProject } from '../actions';
 
   function handleChange(event: Event) {
     const value = (event.target as HTMLSelectElement).value;
     const newId = value ? Number(value) : null;
-    onProjectChange(newId);
+    selectProject(newId);
   }
 </script>
 
 <project-selector>
-  <select value={selectedProjectId} onchange={handleChange}>
+  <select value={appState.selectedProjectId} onchange={handleChange}>
     <option value="">Global</option>
-    {#each projects as p}
+    {#each appState.projects as p}
       <option value={p.id}>{p.name} ({p.chunk_count} chunks)</option>
     {/each}
   </select>

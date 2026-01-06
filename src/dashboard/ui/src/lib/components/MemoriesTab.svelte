@@ -1,35 +1,22 @@
 <script lang="ts">
-  import type { Memory } from '../../types';
+  import { appState } from '../stores';
   import { 
-    fetchMemories as apiFetchMemories, 
-    fetchDuplicates as apiFetchDuplicates,
-    purgeDuplicates as apiPurgeDuplicates,
-    saveMemory as apiSaveMemory,
-    deleteMemory as apiDeleteMemory,
-    restoreMemory as apiRestoreMemory
-  } from '../api';
+    loadMemories, 
+    purgeDuplicates, 
+    saveMemoryAction, 
+    deleteMemoryAction, 
+    restoreMemoryAction 
+  } from '../actions';
+  import type { Memory } from '../../types';
 
-  interface Props {
-    projectId: number | null;
-  }
-
-  let { projectId }: Props = $props();
-
-  let memories = $state<Memory[]>([]);
-  let memoriesLoading = $state(true);
-  let filter = $state<'all' | 'project' | 'global'>('all');
-  let duplicatesCount = $state(0);
-  let editingMemory = $state<Memory | null>(null);
   let dialogEl = $state<HTMLDialogElement | null>(null);
-  
-  let toast = $state({ visible: false, deletedId: 0 });
   let toastTimeout: ReturnType<typeof setTimeout> | null = null;
 
   // Open/close dialog when editingMemory changes
   $effect(() => {
-    if (editingMemory && dialogEl) {
+    if (appState.editingMemory && dialogEl) {
       dialogEl.showModal();
-    } else if (!editingMemory && dialogEl?.open) {
+    } else if (!appState.editingMemory && dialogEl?.open) {
       dialogEl.close();
     }
   });
@@ -37,91 +24,19 @@
   // Handle backdrop click (click on dialog element itself, not content)
   function handleDialogClick(e: MouseEvent) {
     if (e.target === e.currentTarget) {
-      editingMemory = null;
+      appState.editingMemory = null;
     }
   }
 
-  let filteredMemories = $derived(memories.filter(m => {
-    if (filter === 'all') return true;
-    if (filter === 'project') return m.project_id !== null;
-    if (filter === 'global') return m.project_id === null;
+  let filteredMemories = $derived(appState.memories.filter(m => {
+    if (appState.filter === 'all') return true;
+    if (appState.filter === 'project') return m.project_id !== null;
+    if (appState.filter === 'global') return m.project_id === null;
     return true;
   }));
 
-  async function loadMemories() {
-    memoriesLoading = true;
-    try {
-      memories = await apiFetchMemories(projectId);
-      duplicatesCount = await apiFetchDuplicates(projectId);
-    } catch (e) {
-      console.error('Failed to load memories:', e);
-    } finally {
-      memoriesLoading = false;
-    }
-  }
-
-  async function handlePurgeDuplicates() {
-    try {
-      const result = await apiPurgeDuplicates(projectId);
-      duplicatesCount = 0;
-      await loadMemories();
-    } catch (e) {
-      console.error('Failed to purge duplicates:', e);
-    }
-  }
-
   function startEdit(m: Memory) {
-    editingMemory = { ...m };
-  }
-
-  async function saveEdit() {
-    if (!editingMemory) return;
-    
-    try {
-      await apiSaveMemory(projectId, editingMemory.id, {
-        content: editingMemory.content,
-        concept_type: editingMemory.concept_type,
-        domain: editingMemory.domain ?? null,
-        confidence: editingMemory.confidence
-      });
-      
-      const idx = memories.findIndex(m => m.id === editingMemory!.id);
-      if (idx !== -1) {
-        memories[idx] = { ...editingMemory };
-        memories = [...memories];
-      }
-      editingMemory = null;
-    } catch (e) {
-      console.error('Failed to save memory:', e);
-    }
-  }
-
-  async function handleDelete(id: number) {
-    try {
-      await apiDeleteMemory(projectId, id);
-      memories = memories.filter(m => m.id !== id);
-      
-      toast = { visible: true, deletedId: id };
-      if (toastTimeout) clearTimeout(toastTimeout);
-      toastTimeout = setTimeout(() => {
-        toast = { visible: false, deletedId: 0 };
-      }, 5000);
-    } catch (e) {
-      console.error('Failed to delete memory:', e);
-    }
-  }
-
-  async function undoDelete() {
-    if (!toast.deletedId) return;
-    
-    try {
-      await apiRestoreMemory(projectId, toast.deletedId);
-      await loadMemories();
-      toast = { visible: false, deletedId: 0 };
-      if (toastTimeout) clearTimeout(toastTimeout);
-    } catch (e) {
-      console.error('Failed to restore memory:', e);
-    }
+    appState.editingMemory = { ...m };
   }
 
   // Load memories on mount
@@ -134,18 +49,18 @@
   <mem-header>
     <card-title>Memories</card-title>
     <filter-group>
-      <button class="filter-btn" class:active={filter === 'all'} onclick={() => filter = 'all'}>All</button>
-      <button class="filter-btn" class:active={filter === 'project'} onclick={() => filter = 'project'}>Project Only</button>
-      <button class="filter-btn" class:active={filter === 'global'} onclick={() => filter = 'global'}>Global Only</button>
+      <button class="filter-btn" class:active={appState.filter === 'all'} onclick={() => appState.filter = 'all'}>All</button>
+      <button class="filter-btn" class:active={appState.filter === 'project'} onclick={() => appState.filter = 'project'}>Project Only</button>
+      <button class="filter-btn" class:active={appState.filter === 'global'} onclick={() => appState.filter = 'global'}>Global Only</button>
     </filter-group>
-    {#if duplicatesCount > 0}
-      <button class="action-btn purge" onclick={handlePurgeDuplicates}>
-        Purge Duplicates ({duplicatesCount})
+    {#if appState.duplicatesCount > 0}
+      <button class="action-btn purge" onclick={purgeDuplicates}>
+        Purge Duplicates ({appState.duplicatesCount})
       </button>
     {/if}
   </mem-header>
   
-  {#if memoriesLoading}
+  {#if appState.memoriesLoading}
     <status-message>Loading memories...</status-message>
   {:else}
     <mem-list>
@@ -159,7 +74,7 @@
           <mem-conf>{m.confidence.toFixed(2)}</mem-conf>
           <mem-actions>
             <button class="action-btn edit" onclick={() => startEdit(m)} aria-label="Edit">✏️</button>
-            <button class="action-btn delete" onclick={() => handleDelete(m.id)} aria-label="Delete">×</button>
+            <button class="action-btn delete" onclick={() => deleteMemoryAction(m.id)} aria-label="Delete">×</button>
           </mem-actions>
         </mem-item>
       {/each}
@@ -174,17 +89,18 @@
     onclick={handleDialogClick}
   >
     <form class="modal-content" method="dialog">
-      <card-title id="modal-title">Edit Memory #{editingMemory?.id}</card-title>
+      <card-title id="modal-title">Edit Memory #{appState.editingMemory?.id}</card-title>
       
+      {#if appState.editingMemory}
       <form-field>
         <field-label>Content</field-label>
-        <textarea bind:value={editingMemory!.content} rows="3"></textarea>
+        <textarea bind:value={appState.editingMemory.content} rows="3"></textarea>
       </form-field>
 
       <form-row>
         <form-field>
           <field-label>Type</field-label>
-          <select bind:value={editingMemory!.concept_type}>
+          <select bind:value={appState.editingMemory.concept_type}>
             <option value="pattern">Pattern</option>
             <option value="rule">Rule</option>
             <option value="constraint">Constraint</option>
@@ -196,26 +112,27 @@
 
         <form-field>
           <field-label>Domain</field-label>
-          <input type="text" bind:value={editingMemory!.domain} />
+          <input type="text" bind:value={appState.editingMemory.domain} />
         </form-field>
 
         <form-field>
           <field-label>Confidence</field-label>
-          <input type="number" step="0.01" min="0" max="1" bind:value={editingMemory!.confidence} />
+          <input type="number" step="0.01" min="0" max="1" bind:value={appState.editingMemory.confidence} />
         </form-field>
       </form-row>
+      {/if}
 
       <modal-actions>
-        <button class="action-btn" onclick={() => editingMemory = null}>Cancel</button>
-        <button class="action-btn primary" onclick={saveEdit}>Save</button>
+        <button class="action-btn" onclick={() => appState.editingMemory = null}>Cancel</button>
+        <button class="action-btn primary" onclick={saveMemoryAction}>Save</button>
       </modal-actions>
     </form>
   </dialog>
 
-{#if toast.visible}
+{#if appState.toast.visible}
   <toast-notification>
     <span>Memory deleted.</span>
-    <button class="action-btn undo" onclick={undoDelete}>Undo</button>
+    <button class="action-btn undo" onclick={restoreMemoryAction}>Undo</button>
   </toast-notification>
 {/if}
 

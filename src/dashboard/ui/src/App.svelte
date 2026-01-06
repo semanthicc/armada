@@ -1,142 +1,57 @@
 <script lang="ts">
-  import type { StatusResponse, Project } from './types';
-  import { fetchProjects as apiFetchProjects, fetchStatus as apiFetchStatus } from './lib/api';
+  import { Router, route } from '@mateothegreat/svelte5-router';
+  import { appState } from './lib/stores';
+  import { loadProjects, loadStatus } from './lib/actions';
+  
   import ProjectSelector from './lib/components/ProjectSelector.svelte';
   import StatusPanel from './lib/components/StatusPanel.svelte';
   import MemoriesTab from './lib/components/MemoriesTab.svelte';
   import SearchTab from './lib/components/SearchTab.svelte';
   import SettingsTab from './lib/components/SettingsTab.svelte';
 
-  // State
-  let status = $state<StatusResponse | null>(null);
-  let loading = $state(true);
-  let error = $state<string | null>(null);
-  let projects = $state<Project[]>([]);
-  let selectedProjectId = $state<number | null>(null);
-  let tab = $state('overview');
+  const routes = [
+    { path: '/', component: StatusPanel },
+    { path: '/overview', component: StatusPanel },
+    { path: '/memories', component: MemoriesTab },
+    { path: '/search', component: SearchTab },
+    { path: '/settings', component: SettingsTab }
+  ];
 
-  // Routing Logic (Hash-based)
-  function handleHashChange() {
-    const hash = window.location.hash.slice(1) || 'overview';
-    if (['overview', 'memories', 'search', 'settings'].includes(hash)) {
-      tab = hash;
-    } else {
-      tab = 'overview';
-    }
-  }
-
-  // Init from URL (Project ID + Tab)
+  // Init from URL (Project ID)
   const urlParams = new URLSearchParams(window.location.search);
   const pidParam = urlParams.get('project');
-  if (pidParam) selectedProjectId = Number(pidParam);
-
-  async function loadProjects() {
-    try {
-      projects = await apiFetchProjects(selectedProjectId);
-    } catch (e) {
-      console.error('Failed to fetch projects', e);
-    }
-  }
-
-  async function loadStatus() {
-    try {
-      status = await apiFetchStatus(selectedProjectId);
-    } catch (e: unknown) {
-      error = e instanceof Error ? e.message : String(e);
-    } finally {
-      loading = false;
-    }
-  }
-
-  function handleProjectChange(newProjectId: number | null) {
-    selectedProjectId = newProjectId;
-    
-    const url = new URL(window.location.href);
-    if (selectedProjectId) {
-      url.searchParams.set('project', String(selectedProjectId));
-    } else {
-      url.searchParams.delete('project');
-    }
-    // Preserve hash when changing project
-    window.history.pushState({}, '', url.toString());
-    
-    loading = true;
-    loadStatus();
-  }
-
-  function handleProjectsUpdate(updatedProjects: Project[]) {
-    projects = updatedProjects;
-  }
-
-  function handleAutoIndexChange(newVal: boolean) {
-    if (selectedProjectId) {
-      const idx = projects.findIndex(p => p.id === selectedProjectId);
-      if (idx !== -1) {
-        projects[idx] = { ...projects[idx], auto_index: newVal };
-      }
-    }
-  }
-
-  function handleStatusRefresh() {
-    loadStatus();
-  }
+  if (pidParam) appState.selectedProjectId = Number(pidParam);
 
   // Lifecycle
   $effect(() => {
-    // Initial load
     loadProjects();
     loadStatus();
-    handleHashChange();
-
-    // Listen for hash changes
-    window.addEventListener('hashchange', handleHashChange);
-    return () => window.removeEventListener('hashchange', handleHashChange);
   });
-  
-  let currentProject = $derived(projects.find(p => p.id === selectedProjectId));
-  let currentAutoIndex = $derived(currentProject?.auto_index ?? false);
 </script>
 
 <app-shell>
   <app-header>
     <div class="header-left">
       <logo>Semanthicc</logo>
-      <ProjectSelector 
-        {projects}
-        {selectedProjectId}
-        onProjectChange={handleProjectChange}
-      />
+      <ProjectSelector />
     </div>
 
     <nav-bar>
-      <a class="tab-link" class:active={tab === 'overview'} href="#overview">Overview</a>
-      <a class="tab-link" class:active={tab === 'memories'} href="#memories">Memories</a>
-      <a class="tab-link" class:active={tab === 'search'} href="#search">Search</a>
-      <a class="tab-link" class:active={tab === 'settings'} href="#settings">Settings</a>
+      <a href="#/overview" use:route>Overview</a>
+      <a href="#/memories" use:route>Memories</a>
+      <a href="#/search" use:route>Search</a>
+      <a href="#/settings" use:route>Settings</a>
     </nav-bar>
   </app-header>
 
-  {#if loading}
+  {#if appState.loading}
     <status-message>Loading...</status-message>
-  {:else if error}
-    <status-message type="error">Error: {error}</status-message>
-  {:else if status}
-    {#if tab === 'overview'}
-      <StatusPanel 
-        {status}
-        projectId={selectedProjectId}
-        autoIndex={currentAutoIndex}
-        embeddingWarning={status.embeddingWarning}
-        onStatusRefresh={handleStatusRefresh}
-        onAutoIndexChange={handleAutoIndexChange}
-      />
-    {:else if tab === 'memories'}
-      <MemoriesTab projectId={selectedProjectId} />
-    {:else if tab === 'search'}
-      <SearchTab projectId={selectedProjectId} />
-    {:else if tab === 'settings'}
-      <SettingsTab projectId={selectedProjectId} />
-    {/if}
+  {:else if appState.error}
+    <status-message type="error">Error: {appState.error}</status-message>
+  {:else if appState.status}
+    <div class="main-content">
+      <Router {routes} />
+    </div>
   {/if}
 </app-shell>
 
@@ -175,7 +90,7 @@
     gap: 1rem;
   }
 
-  a.tab-link {
+  nav-bar a {
     text-decoration: none;
     color: inherit;
     font-size: 1rem;
@@ -184,11 +99,11 @@
     transition: background-color 0.2s;
   }
 
-  a.tab-link:hover {
+  nav-bar a:hover {
     background: #f5f5f5;
   }
 
-  a.tab-link.active {
+  :global(a.active) {
     background: #eee;
     font-weight: bold;
   }

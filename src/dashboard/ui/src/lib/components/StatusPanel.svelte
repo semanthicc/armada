@@ -1,17 +1,13 @@
 <script lang="ts">
   import type { StatusResponse } from '../../types';
-  import { indexProject as apiIndexProject, deleteIndex as apiDeleteIndex, stopIndex as apiStopIndex, updateProjectAutoIndex, type IndexProgressEvent } from '../api';
+  import { appState, getCurrentProject } from '../stores';
+  import { toggleAutoIndex, loadStatus } from '../actions';
+  import { indexProject as apiIndexProject, deleteIndex as apiDeleteIndex, stopIndex as apiStopIndex, type IndexProgressEvent } from '../api';
 
-  interface Props {
-    status: StatusResponse;
-    projectId: number | null;
-    autoIndex: boolean;
-    embeddingWarning: StatusResponse['embeddingWarning'];
-    onStatusRefresh: () => void;
-    onAutoIndexChange: (newVal: boolean) => void;
-  }
-
-  let { status, projectId, autoIndex, embeddingWarning, onStatusRefresh, onAutoIndexChange }: Props = $props();
+  let projectId = $derived(appState.selectedProjectId);
+  let status = $derived(appState.status!);
+  let autoIndex = $derived(getCurrentProject()?.auto_index ?? false);
+  let embeddingWarning = $derived(appState.status?.embeddingWarning);
 
   let indexing = $state(false);
   let deletingIndex = $state(false);
@@ -47,12 +43,12 @@
           }
           indexProgress = 100;
           indexStatusText = 'Complete!';
-          onStatusRefresh();
+          loadStatus();
         } else if (event.type === 'aborted') {
           indexMsg = 'Indexing aborted by user.';
           indexMsgType = 'info';
           indexStatusText = 'Aborted';
-          onStatusRefresh();
+          loadStatus();
         } else if (event.type === 'error') {
           throw new Error(event.error);
         }
@@ -88,7 +84,7 @@
       await apiDeleteIndex(projectId);
       indexMsg = 'Index deleted successfully.';
       indexMsgType = 'success';
-      onStatusRefresh();
+      loadStatus();
     } catch (e: unknown) {
       console.error(e);
       indexMsg = 'Failed to delete index: ' + (e instanceof Error ? e.message : String(e));
@@ -101,17 +97,6 @@
   async function handleForceReindex() {
     await handleDelete();
     await handleIndex();
-  }
-
-  async function toggleAutoIndex() {
-    if (!projectId) return;
-    try {
-      const newVal = !autoIndex;
-      await updateProjectAutoIndex(projectId, newVal);
-      onAutoIndexChange(newVal);
-    } catch (e) {
-      console.error('Failed to toggle auto-index', e);
-    }
   }
 </script>
 

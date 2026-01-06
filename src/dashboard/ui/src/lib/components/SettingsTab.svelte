@@ -1,115 +1,73 @@
 <script lang="ts">
-  import type { EmbeddingConfig } from '../../types';
-  import { fetchConfig as apiFetchConfig, saveConfig as apiSaveConfig } from '../api';
+  import { appState } from '../stores';
+  import { loadConfigAction, saveConfigAction } from '../actions';
 
-  interface Props {
-    projectId: number | null;
-  }
-
-  let { projectId }: Props = $props();
-
-  let config = $state<EmbeddingConfig>({
-    provider: 'gemini',
-    geminiModel: 'text-embedding-004',
-    dimensions: null,
-    hasApiKey: false
-  });
-  let apiKey = $state('');
-  let loading = $state(true);
-  let saving = $state(false);
   let message = $state<{ text: string; type: 'success' | 'error' } | null>(null);
-
-  async function loadConfig() {
-    loading = true;
-    try {
-      const data = await apiFetchConfig(projectId);
-      if (data.embedding) {
-        config = data.embedding;
-      }
-    } catch (e) {
-      console.error('Failed to load config:', e);
-    } finally {
-      loading = false;
-    }
-  }
+  let saving = $state(false);
 
   async function handleSave() {
     saving = true;
     message = null;
-
-    try {
-      await apiSaveConfig(projectId, {
-        provider: config.provider,
-        geminiModel: config.geminiModel,
-        dimensions: config.dimensions
-      }, apiKey || undefined);
-
+    const success = await saveConfigAction();
+    if (success) {
       message = { text: 'Settings saved successfully!', type: 'success' };
-      apiKey = '';
-      await loadConfig();
-    } catch (e) {
-      console.error('Failed to save config:', e);
+    } else {
       message = { text: 'Failed to save settings', type: 'error' };
-    } finally {
-      saving = false;
     }
+    saving = false;
   }
 
   // Load config on mount
   $effect(() => {
-    loadConfig();
+    loadConfigAction();
   });
 </script>
 
 <info-card>
   <card-title>Embedding Settings</card-title>
   
-  {#if loading}
-    <status-message>Loading settings...</status-message>
-  {:else}
+  <form-field>
+    <field-label>Provider</field-label>
+    <select bind:value={appState.embeddingConfig.provider}>
+      <option value="gemini">Google Gemini</option>
+      <option value="local">Local (Transformers.js)</option>
+    </select>
+  </form-field>
+
+  {#if appState.embeddingConfig.provider === 'gemini'}
     <form-field>
-      <field-label>Provider</field-label>
-      <select bind:value={config.provider}>
-        <option value="gemini">Google Gemini</option>
-        <option value="local">Local (Transformers.js)</option>
+      <field-label>Model</field-label>
+      <select bind:value={appState.embeddingConfig.geminiModel}>
+        <option value="text-embedding-004">text-embedding-004</option>
+        <option value="embedding-001">embedding-001</option>
       </select>
     </form-field>
 
-    {#if config.provider === 'gemini'}
-      <form-field>
-        <field-label>Model</field-label>
-        <select bind:value={config.geminiModel}>
-          <option value="text-embedding-004">text-embedding-004</option>
-          <option value="embedding-001">embedding-001</option>
-        </select>
-      </form-field>
+    <form-field>
+      <field-label>Dimensions (optional)</field-label>
+      <input type="number" bind:value={appState.embeddingConfig.dimensions} placeholder="Auto" min="1" max="3072" />
+      <field-hint>Leave empty for model default. Lower values = smaller index size.</field-hint>
+    </form-field>
 
-      <form-field>
-        <field-label>Dimensions (optional)</field-label>
-        <input type="number" bind:value={config.dimensions} placeholder="Auto" min="1" max="3072" />
-        <field-hint>Leave empty for model default. Lower values = smaller index size.</field-hint>
-      </form-field>
+    <form-field>
+      <field-label>API Key {appState.embeddingConfig.hasApiKey ? '(configured)' : ''}</field-label>
+      <input 
+        type="password" 
+        bind:value={appState.geminiApiKey} 
+        placeholder={appState.embeddingConfig.hasApiKey ? '••••••••' : 'Enter API Key'} 
+      />
+      <field-hint>Leave blank to keep existing key.</field-hint>
+    </form-field>
+  {/if}
 
-      <form-field>
-        <field-label>API Key {config.hasApiKey ? '(configured)' : ''}</field-label>
-        <input 
-          type="password" 
-          bind:value={apiKey} 
-          placeholder={config.hasApiKey ? '••••••••' : 'Enter API Key'} 
-        />
-        <field-hint>Leave blank to keep existing key.</field-hint>
-      </form-field>
-    {/if}
+  <form-actions>
+    <button class="action-btn primary" onclick={handleSave} disabled={saving}>
+      {saving ? 'Saving...' : 'Save Settings'}
+    </button>
+  </form-actions>
 
-    <form-actions>
-      <button class="action-btn primary" onclick={handleSave} disabled={saving}>
-        {saving ? 'Saving...' : 'Save Settings'}
-      </button>
-    </form-actions>
-
-    {#if message}
-      <status-message type={message.type}>{message.text}</status-message>
-    {/if}
+  {#if message}
+    <status-message type={message.type}>{message.text}</status-message>
   {/if}
 </info-card>
 

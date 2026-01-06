@@ -1,30 +1,6 @@
 <script lang="ts">
-  import type { SearchResult } from '../../types';
-  import { runSearch as apiRunSearch } from '../api';
-
-  interface Props {
-    projectId: number | null;
-  }
-
-  let { projectId }: Props = $props();
-
-  let searchQuery = $state('');
-  let searchResults = $state<SearchResult[]>([]);
-  let searchLoading = $state(false);
-
-  async function handleSearch() {
-    if (!searchQuery.trim()) return;
-    
-    searchLoading = true;
-    try {
-      searchResults = await apiRunSearch(projectId, searchQuery);
-    } catch (e) {
-      console.error('Search failed:', e);
-      searchResults = [];
-    } finally {
-      searchLoading = false;
-    }
-  }
+  import { appState } from '../stores';
+  import { searchAction } from '../actions';
 </script>
 
 <info-card>
@@ -32,18 +8,18 @@
   <search-box>
     <input 
       type="text" 
-      bind:value={searchQuery} 
+      bind:value={appState.searchQuery} 
       placeholder="Search code..." 
-      onkeydown={(e) => e.key === 'Enter' && handleSearch()}
+      onkeydown={(e) => e.key === 'Enter' && searchAction()}
     />
-    <button class="action-btn" onclick={handleSearch} disabled={searchLoading}>Search</button>
+    <button class="action-btn" onclick={searchAction} disabled={appState.searchLoading}>Search</button>
   </search-box>
 
-  {#if searchLoading}
+  {#if appState.searchLoading}
     <status-message>Searching...</status-message>
-  {:else if searchResults.length > 0}
+  {:else if appState.searchResults.length > 0}
     <result-list>
-      {#each searchResults as r}
+      {#each appState.searchResults as r}
         <result-item>
           <result-header>
             <result-file>{r.filePath}</result-file>
