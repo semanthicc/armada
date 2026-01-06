@@ -9,38 +9,72 @@ automention: true
 This workflow provides **robust tools** for managing Captain resources (workflows, rules, crews). 
 Use these tools instead of the CLI when dealing with complex content (multiline strings, markdown) to avoid shell quoting issues.
 
-## Available Tools
+## Resource Management (Workflows/Rules/Crews)
 
-- `captain_tool("captain-manager/list", { type?, tag?, folder? })`
+- `captain_tool("captain-manager/resource_list", { type?, tag?, folder? })`
   - List available items with optional filtering
   
-- `captain_tool("captain-manager/read", { name, type? })`
+- `captain_tool("captain-manager/resource_read", { name, type? })`
   - Read the full content of an item (including frontmatter)
   
-- `captain_tool("captain-manager/create", { type, name, content, force? })`
+- `captain_tool("captain-manager/resource_create", { type, name, content, force? })`
   - Create a new item. `content` must include full frontmatter + body.
   
-- `captain_tool("captain-manager/update", { name, content, type? })`
+- `captain_tool("captain-manager/resource_update", { name, content, type? })`
   - Update an existing item's content.
   
-- `captain_tool("captain-manager/delete", { name, type? })`
+- `captain_tool("captain-manager/resource_delete", { name, type? })`
   - Delete an item.
+
+## Tool Management (Code Tools)
+
+- `captain_tool("captain-manager/tool_list", { target })`
+  - List custom tools in a workflow/category
+
+- `captain_tool("captain-manager/tool_create", { target, name, description, parameters, code, force? })`
+  - Create a custom tool. Auto-generates TypeScript code.
+
+- `captain_tool("captain-manager/tool_update", { target, name, description, parameters, code })`
+  - Update an existing tool (full rewrite).
+
+- `captain_tool("captain-manager/tool_read", { target, name })`
+  - Read tool source code.
+
+- `captain_tool("captain-manager/tool_delete", { target, name })`
+  - Delete a tool.
 
 ## Examples
 
 ### 1. List Workflows
 ```javascript
-captain_tool("captain-manager/list", { type: "workflow" })
+captain_tool("captain-manager/resource_list", { type: "workflow" })
 ```
 
-### 2. Read a Workflow
+### 2. Create a Custom Tool
 ```javascript
-captain_tool("captain-manager/read", { name: "marketing/research" })
+captain_tool("captain-manager/tool_create", {
+  target: "marketing",
+  name: "fetch-data",
+  description: "Fetch data from API",
+  parameters: {
+    url: { type: "string", required: true },
+    method: { type: "string", default: "GET" }
+  },
+  code: `
+    const response = await fetch(args.url, { method: args.method });
+    return await response.json();
+  `
+})
 ```
 
-### 3. Create a Complex Workflow
+### 3. Read a Workflow
 ```javascript
-captain_tool("captain-manager/create", {
+captain_tool("captain-manager/resource_read", { name: "marketing/research" })
+```
+
+### 4. Create a Complex Workflow
+```javascript
+captain_tool("captain-manager/resource_create", {
   type: "workflow",
   name: "code-review",
   content: `---
@@ -55,9 +89,9 @@ tags: [review, git]
 })
 ```
 
-### 4. Update Content
+### 5. Update Content
 ```javascript
-captain_tool("captain-manager/update", {
+captain_tool("captain-manager/resource_update", {
   name: "code-review",
   content: `---
 description: Updated description
@@ -72,8 +106,8 @@ description: Updated description
 |------|------------------|------|
 | **Listing** | CLI (`captain list`) | Faster output |
 | **Simple Create** | CLI (`captain create ...`) | Quick for one-liners |
-| **Complex Create** | **Tools** (`captain_tool`) | Handles newlines/quotes safely |
-| **Editing** | **Tools** (`captain_tool`) | Safer content handling |
+| **Complex Create** | **Tools** (`resource_create`) | Handles newlines/quotes safely |
+| **Editing** | **Tools** (`resource_update`) | Safer content handling |
 | **Deleting** | CLI (`captain delete`) | Simple |
 
 ## CLI Quick Reference
