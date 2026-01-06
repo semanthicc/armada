@@ -217,3 +217,82 @@ export async function getIndexCoverage(projectPath: string, projectId: number): 
     coveragePercent,
   };
 }
+
+export interface PathStatus {
+  path: string;
+  isRegistered: boolean;
+  projectId: number | null;
+  projectName: string | null;
+  isIndexed: boolean;
+  chunkCount: number;
+  embeddingModel: string | null;
+  suggestion: string;
+}
+
+export function getPathStatus(targetPath: string): PathStatus {
+  const ctx = getLegacyContext();
+  const normalizedPath = targetPath.replace(/\\/g, "/");
+  
+  const project = ctx.db.query(`
+    SELECT id, name, path, chunk_count FROM projects 
+    WHERE REPLACE(path, '\\', '/') = ?
+    OR ? LIKE REPLACE(path, '\\', '/') || '%'
+    ORDER BY LENGTH(path) DESC
+    LIMIT 1
+  `).get(normalizedPath, normalizedPath) as { 
+    id: number; 
+    name: string | null; 
+    path: string; 
+    chunk_count: number 
+  } | null;
+  
+  if (project) {
+    const embeddingConfig = getStoredEmbeddingConfig(project.id);
+    const isIndexed = project.chunk_count > 0;
+    
+    return {
+      path: targetPath,
+      isRegistered: true,
+      projectId: project.id,
+      projectName: project.name,
+      isIndexed,
+      chunkCount: project.chunk_count,
+      embeddingModel: embeddingConfig?.model ?? null,
+      suggestion: isIndexed 
+        ? `Ready to search. Use: semanthicc search "query"` 
+        : `Not indexed. Use: semanthicc index`
+    };
+  }
+  
+  return {
+    path: targetPath,
+    isRegistered: false,
+    projectId: null,
+    projectName: null,
+    isIndexed: false,
+    chunkCount: 0,
+    embeddingModel: null,
+    suggestion: `Not registered. Use: semanthicc index --path="${targetPath}" --temp`
+  };
+}
+
+export function formatPathStatus(status: PathStatus): string {
+  const lines: string[] = [];
+  
+  lines.push(`Path: ${status.path}`);
+  
+  if (status.isRegistered) {
+    lines.push(`Status: Registered as project "${status.projectName}" (id=${status.projectId})`);
+    if (status.isIndexed) {
+      lines.push(`Index: ✅ ${status.chunkCount} chunks | Model: ${status.embeddingModel}`);
+    } else {
+      lines.push(`Index: ❌ Not indexed`);
+    }
+  } else {
+    lines.push(`Status: ❌ Not registered`);
+  }
+  
+  lines.push(`Suggestion: ${status.suggestion}`);
+  
+  return lines.join("\n");
+}

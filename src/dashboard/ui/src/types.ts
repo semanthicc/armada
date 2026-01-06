@@ -79,6 +79,7 @@ export interface Project {
   name: string;
   path: string;
   chunk_count: number;
+  auto_index: boolean;
 }
 
 export interface Toast {

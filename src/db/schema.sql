@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS projects (
   path TEXT NOT NULL UNIQUE,
   name TEXT,
   type TEXT DEFAULT 'active' CHECK(type IN ('active', 'reference', 'archived')),
+  auto_index INTEGER DEFAULT 0 CHECK(auto_index IN (0, 1)),
   last_indexed_at INTEGER,
   chunk_count INTEGER DEFAULT 0,
   memory_count INTEGER DEFAULT 0,

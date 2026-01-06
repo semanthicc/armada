@@ -5,6 +5,7 @@ export interface FormattedSearchResult {
   lines: string;
   similarity: string;
   preview: string;
+  projectName?: string;
 }
 
 export function formatSearchResults(
@@ -23,6 +24,7 @@ export function formatSearchResults(
       lines: `${result.chunkStart}-${result.chunkEnd}`,
       similarity: (result.similarity * 100).toFixed(1) + "%",
       preview: preview + truncated,
+      projectName: result.projectName,
     };
   });
 }
@@ -37,7 +39,8 @@ export function formatSearchResultsForTool(response: SearchResponse): string {
   
   return `${searchInfo} Found ${response.results.length} results:\n\n` + formatted
     .map((r, i) => {
-      return `**${i + 1}. ${r.file}** (lines ${r.lines}, ${r.similarity} match)
+      const projectPrefix = r.projectName ? `[${r.projectName}] ` : "";
+      return `**${i + 1}. ${projectPrefix}${r.file}** (lines ${r.lines}, ${r.similarity} match)
 \`\`\`
 ${r.preview}
 \`\`\``;

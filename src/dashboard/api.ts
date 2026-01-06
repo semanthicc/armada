@@ -57,13 +57,29 @@ export async function handleRequest(
 
     if (path === "/projects") {
       const projects = ctx.db.prepare(`
-        SELECT p.id, p.name, p.path, p.last_indexed_at,
+        SELECT p.id, p.name, p.path, p.last_indexed_at, p.auto_index,
                (SELECT COUNT(*) FROM file_hashes WHERE project_id = p.id) as indexed_files
         FROM projects p
         ORDER BY p.last_indexed_at DESC NULLS LAST
-      `).all() as Array<{ id: number; name: string; path: string; last_indexed_at: number | null; indexed_files: number }>;
+      `).all() as Array<{ id: number; name: string; path: string; last_indexed_at: number | null; auto_index: number; indexed_files: number }>;
       
       return Response.json(projects);
+    }
+    
+    if (req.method === "PATCH" && path.startsWith("/projects/")) {
+      const idStr = path.split("/")[2] ?? "";
+      const id = Number.parseInt(idStr, 10);
+      if (Number.isNaN(id)) {
+        return Response.json({ error: "Invalid project ID" }, { status: 400 });
+      }
+      
+      const body = await req.json() as { auto_index?: boolean };
+      if (body.auto_index !== undefined) {
+        ctx.db.prepare("UPDATE projects SET auto_index = ?, updated_at = ? WHERE id = ?")
+          .run(body.auto_index ? 1 : 0, Date.now(), id);
+      }
+      
+      return Response.json({ success: true });
     }
 
     if (path === "/memories") {

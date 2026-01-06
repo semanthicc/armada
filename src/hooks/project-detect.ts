@@ -57,3 +57,24 @@ export function listProjects(ctx?: SemanthiccContext): Project[] {
   const stmt = context.db.prepare("SELECT * FROM projects ORDER BY updated_at DESC");
   return stmt.all() as Project[];
 }
+
+export function findProjectByPath(targetPath: string, ctx?: SemanthiccContext): Project | null {
+  const context = ctx ?? getLegacyContext();
+  const normalizedPath = targetPath.replace(/\\/g, "/");
+  
+  const stmt = context.db.prepare(`
+    SELECT * FROM projects 
+    WHERE REPLACE(path, '\\', '/') = ?
+    OR ? LIKE REPLACE(path, '\\', '/') || '%'
+    ORDER BY LENGTH(path) DESC
+    LIMIT 1
+  `);
+  
+  return stmt.get(normalizedPath, normalizedPath) as Project | null;
+}
+
+export function getProjectById(id: number, ctx?: SemanthiccContext): Project | null {
+  const context = ctx ?? getLegacyContext();
+  const stmt = context.db.prepare("SELECT * FROM projects WHERE id = ?");
+  return stmt.get(id) as Project | null;
+}

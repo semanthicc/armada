@@ -1,7 +1,8 @@
 import { getDb } from "../db";
 import type { SemanthiccContext } from "../context";
-import { embedText, validateEmbeddingConfig, EmbeddingConfigMismatchError } from "../embeddings";
+import { embedText, validateEmbeddingConfig, EmbeddingConfigMismatchError, getStoredEmbeddingConfig } from "../embeddings";
 import { searchVectors, hybridSearch } from "../lance/embeddings";
+import { searchTempIndex, isTempIndexed } from "../lance/temp-index";
 import { loadGlobalConfig } from "../config";
 import { expandQuery } from "./synonyms";
 import { log } from "../logger";
@@ -17,6 +18,8 @@ export interface SearchResult {
   chunkEnd: number;
   content: string;
   similarity: number;
+  projectId?: number;
+  projectName?: string;
 }
 
 export interface SearchResponse {
@@ -114,7 +117,103 @@ export function searchByFilePattern(
   projectIdOrPattern: number | string,
   pattern?: string
 ): SearchResult[] {
-  // File pattern search not supported in LanceDB migration yet
-  // Would require SQL-like filter on LanceDB table
   return [];
+}
+
+export async function searchTempPath(
+  query: string,
+  path: string,
+  options: { limit?: number; focus?: string } = {}
+): Promise<SearchResponse> {
+  if (!isTempIndexed(path)) {
+    throw new Error(`Path "${path}" is not indexed. Run: semanthicc index --path="${path}"`);
+  }
+  
+  const queryEmbedding = await embedText(query);
+  
+  const start = performance.now();
+  const response = await searchTempIndex(path, Array.from(queryEmbedding), options);
+  const duration = performance.now() - start;
+  
+  log.api.info(`Temp search path="${path}" query="${query}" took ${duration.toFixed(2)}ms (found ${response.results.length} results)`);
+  
+  return {
+    results: response.results.map((r, index) => ({
+      id: index,
+      filePath: r.file_path,
+      chunkStart: r.chunk_start,
+      chunkEnd: r.chunk_end,
+      content: r.content,
+      similarity: r._score ?? 0,
+    })),
+    searchType: "vector-only",
+    ftsIndexed: false,
+  };
+}
+
+export async function searchMultipleProjects(
+  query: string,
+  projectIds: number[],
+  projectNames: Map<number, string>,
+  options: { limit?: number; focus?: string } = {}
+): Promise<SearchResponse> {
+  if (projectIds.length === 0) {
+    return { results: [], searchType: "vector-only", ftsIndexed: false };
+  }
+  
+  const configs = projectIds.map(id => ({ id, config: getStoredEmbeddingConfig(id) }));
+  const firstModel = configs[0]?.config?.model;
+  const mismatchedProjects = configs.filter(c => c.config?.model !== firstModel);
+  
+  if (mismatchedProjects.length > 0 && firstModel) {
+    const mismatchInfo = mismatchedProjects.map(p => `Project ${p.id}: ${p.config?.model ?? "not configured"}`).join(", ");
+    throw new Error(`Cross-project search requires same embedding model. First project uses "${firstModel}" but: ${mismatchInfo}`);
+  }
+  
+  const queryEmbedding = await embedText(query);
+  const expandedQuery = expandQuery(query);
+  const resultLimit = options.limit ?? 10;
+  
+  const start = performance.now();
+  const allResults: SearchResult[] = [];
+  
+  for (const projectId of projectIds) {
+    try {
+      const response = await hybridSearch(
+        projectId,
+        expandedQuery,
+        Array.from(queryEmbedding),
+        resultLimit,
+        undefined,
+        options.focus as "code" | "docs" | "tests" | "mixed" | undefined
+      );
+      
+      for (const r of response.results) {
+        allResults.push({
+          id: allResults.length,
+          filePath: r.file_path,
+          chunkStart: r.chunk_start,
+          chunkEnd: r.chunk_end,
+          content: r.content,
+          similarity: r._relevanceScore ?? r._score ?? 0,
+          projectId,
+          projectName: projectNames.get(projectId) ?? `Project ${projectId}`,
+        });
+      }
+    } catch (error) {
+      log.api.warn(`Cross-project search: Error searching project ${projectId}: ${error}`);
+    }
+  }
+  
+  allResults.sort((a, b) => b.similarity - a.similarity);
+  const limitedResults = allResults.slice(0, resultLimit);
+  
+  const duration = performance.now() - start;
+  log.api.info(`Cross-project search query="${query}" projects=[${projectIds.join(",")}] took ${duration.toFixed(2)}ms (found ${limitedResults.length} results)`);
+  
+  return {
+    results: limitedResults,
+    searchType: "hybrid",
+    ftsIndexed: true,
+  };
 }

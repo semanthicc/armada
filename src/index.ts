@@ -7,9 +7,11 @@ import { isToolError } from "./hooks/error-detect";
 import { addMemory, deleteMemory, listMemories, supersedeMemory, archiveMemory, promoteMemory, demoteMemory } from "./heuristics";
 import { exportMemories, importMemories } from "./heuristics/transfer";
 import { detectHistoryIntent } from "./heuristics/intent";
-import { indexProject, getIndexStats } from "./indexer";
-import { searchCode, formatSearchResultsForTool } from "./search";
-import { getStatus, formatStatus } from "./status";
+import { indexProject, getIndexStats, indexTempPath } from "./indexer";
+import { searchCode, formatSearchResultsForTool, searchTempPath, searchMultipleProjects } from "./search";
+import { getStatus, formatStatus, getPathStatus, formatPathStatus } from "./status";
+import { findProjectByPath, getProjectById, listProjects } from "./hooks/project-detect";
+import { isTempIndexed } from "./lance/temp-index";
 import { startDashboard, stopDashboard, getDashboardPort } from "./dashboard/server";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join, isAbsolute } from "node:path";
@@ -131,7 +133,14 @@ SEARCH QUERY TIPS for better results:
 - Describe WHAT code does: "applies tool profile to enable disable" > "tool activation"
 - Include technical terms: "async function validates JWT token" > "auth check"
 - Code queries find .ts/.js files; prose queries find docs
-- If results are mostly docs, rephrase with function/class descriptions`,
+- If results are mostly docs, rephrase with function/class descriptions
+
+CROSS-PROJECT & ARBITRARY PATH SEARCH:
+- Check if a path is indexed: status --path="/repos/dependency"
+- Index an external path: index --path="/repos/dependency" (creates temp index)
+- Search external path: search "query" --path="/repos/dependency"
+- Search multiple projects: search "query" --projects=1,2,3 (comma-separated IDs)
+- Results include [ProjectName] prefix for attribution`,
         args: {
           action: tool.schema
             .enum(["search", "index", "status", "remember", "forget", "list", "supersede", "failure-fixed", "promote", "demote", "import", "export", "dashboard"])
@@ -172,9 +181,21 @@ SEARCH QUERY TIPS for better results:
             .enum(["code", "docs", "tests", "mixed"])
             .describe("Search focus: 'code' filters to source files (use technical/code-style queries like function names, not natural language), 'docs' filters to markdown, 'tests' filters to spec files, 'mixed' searches all")
             .optional(),
+          path: tool.schema
+            .string()
+            .describe("Arbitrary path to search/index. If path matches a registered project, uses that. Otherwise creates a temporary index.")
+            .optional(),
+          projects: tool.schema
+            .string()
+            .describe("Comma-separated project IDs for cross-project search (e.g., '1,2,3'). Results are merged and attributed to source project.")
+            .optional(),
+          temp: tool.schema
+            .boolean()
+            .describe("For index action with --path: create temporary index (discarded after session). Default true for unregistered paths.")
+            .optional(),
         },
         async execute(args) {
-          const { action, query, type, domain, global: isGlobal, id, limit = 5, includeHistory, force, focus } = args;
+          const { action, query, type, domain, global: isGlobal, id, limit = 5, includeHistory, force, focus, path: targetPath, projects: projectsArg, temp } = args;
           const project = getOrCreateProject(directory);
 
           switch (action) {
@@ -182,6 +203,39 @@ SEARCH QUERY TIPS for better results:
               if (!query) {
                 return "Error: Query is required for search";
               }
+              
+              if (projectsArg) {
+                const projectIds = projectsArg.split(",").map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n));
+                if (projectIds.length === 0) {
+                  return "Error: Invalid projects format. Use comma-separated IDs: --projects=1,2,3";
+                }
+                
+                const projectNames = new Map<number, string>();
+                for (const id of projectIds) {
+                  const p = getProjectById(id);
+                  if (p) {
+                    projectNames.set(id, p.name ?? `Project ${id}`);
+                  }
+                }
+                
+                const results = await searchMultipleProjects(query, projectIds, projectNames, { limit, focus });
+                const header = `[Cross-project search: ${projectIds.map(id => projectNames.get(id) || id).join(", ")}]\n`;
+                return header + formatSearchResultsForTool(results);
+              }
+              
+              if (targetPath) {
+                const existingProject = findProjectByPath(targetPath);
+                if (existingProject) {
+                  const results = await searchCode(query, existingProject.id, { limit, focus });
+                  return `[Project: ${existingProject.name}]\n${formatSearchResultsForTool(results)}`;
+                } else if (isTempIndexed(targetPath)) {
+                  const results = await searchTempPath(query, targetPath, { limit, focus });
+                  return `[Temp: ${targetPath}]\n${formatSearchResultsForTool(results)}`;
+                } else {
+                  return `Error: Path "${targetPath}" is not indexed.\nRun: semanthicc index --path="${targetPath}"`;
+                }
+              }
+              
               if (!project) {
                 return "Error: Not in a git repository. Run 'index' action from within a git project.";
               }
@@ -194,6 +248,18 @@ SEARCH QUERY TIPS for better results:
             }
 
             case "index": {
+              if (targetPath) {
+                const existingProject = findProjectByPath(targetPath);
+                if (existingProject) {
+                  const result = await indexProject(existingProject.path, {
+                    projectName: existingProject.name ?? undefined,
+                  });
+                  return `Indexed project "${existingProject.name}" (id=${existingProject.id}): ${result.filesIndexed} files, ${result.chunksCreated} chunks in ${result.durationMs}ms`;
+                } else {
+                  const result = await indexTempPath(targetPath);
+                  return `Temporary index created for ${targetPath}: ${result.filesIndexed} files, ${result.chunksCreated} chunks in ${result.durationMs}ms\nTemp ID: ${result.tempId}\nNote: This is a temporary index. Use semanthicc search --path="${targetPath}" to search it.`;
+                }
+              }
               const result = await indexProject(directory, {
                 projectName: directory.split(/[/\\]/).pop(),
               });
@@ -201,6 +267,10 @@ SEARCH QUERY TIPS for better results:
             }
 
             case "status": {
+              if (targetPath) {
+                const pathStatus = getPathStatus(targetPath);
+                return formatPathStatus(pathStatus);
+              }
               const status = getStatus(project?.id ?? null);
               return formatStatus(status);
             }

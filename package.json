@@ -16,14 +16,17 @@
     "build": "bun run build:dashboard && bun run build:main",
     "build:main": "bun build src/index.ts --outdir dist --target bun --external @xenova/transformers",
     "build:dashboard": "cd src/dashboard/ui && vite build",
-    "build:all": "bun run typecheck && bun run build",
+    "build:all": "bun run check:all && bun run build",
     "test": "bun test src/",
     "dev": "bun run src/index.ts",
     "dashboard:dev": "cd src/dashboard/ui && vite dev --host",
     "check": "tsc --noEmit",
+    "check:all": "bun run check && bun run check:dashboard && bun run check:build",
+    "check:dashboard": "cd src/dashboard/ui && bunx svelte-check --tsconfig ./tsconfig.json",
+    "check:build": "cd src/dashboard/ui && vite build --mode development",
     "typecheck": "tsc --noEmit",
     "typecheck:dashboard": "cd src/dashboard/ui && svelte-check",
-    "ci": "bun run typecheck && bun run build && bun run test"
+    "ci": "bun run check:all && bun run build && bun run test"
   },
   "devDependencies": {
     "@types/bun": "latest",
@@ -50,6 +53,7 @@
     "@lancedb/lancedb": "^0.23.0",
     "@opencode-ai/plugin": "^1.0.224",
     "@xenova/transformers": "^2.17.2",
-    "code-chunk-fork": "0.2.1"
+    "code-chunk-fork": "0.2.1",
+    "p-limit": "^7.2.0"
   }
 }

@@ -49,6 +49,13 @@ function runSchema(database: Database): void {
       CREATE INDEX IF NOT EXISTS idx_embedding_config_project ON embedding_config(project_id);
     `);
   }
+  
+  // Migration: add auto_index column to projects if missing (v1.8.0)
+  const projectCols = database.prepare("PRAGMA table_info(projects)").all() as { name: string }[];
+  const hasAutoIndex = projectCols.some(col => col.name === "auto_index");
+  if (!hasAutoIndex) {
+    database.exec("ALTER TABLE projects ADD COLUMN auto_index INTEGER DEFAULT 0 CHECK(auto_index IN (0, 1))");
+  }
 }
 
 export function getDb(customPath?: string): Database {
