@@ -7,16 +7,25 @@
   import SearchTab from './lib/components/SearchTab.svelte';
   import SettingsTab from './lib/components/SettingsTab.svelte';
 
+  // State
   let status = $state<StatusResponse | null>(null);
   let loading = $state(true);
   let error = $state<string | null>(null);
-
   let projects = $state<Project[]>([]);
   let selectedProjectId = $state<number | null>(null);
-
   let tab = $state('overview');
 
-  // Init from URL
+  // Routing Logic (Hash-based)
+  function handleHashChange() {
+    const hash = window.location.hash.slice(1) || 'overview';
+    if (['overview', 'memories', 'search', 'settings'].includes(hash)) {
+      tab = hash;
+    } else {
+      tab = 'overview';
+    }
+  }
+
+  // Init from URL (Project ID + Tab)
   const urlParams = new URLSearchParams(window.location.search);
   const pidParam = urlParams.get('project');
   if (pidParam) selectedProjectId = Number(pidParam);
@@ -42,16 +51,15 @@
   function handleProjectChange(newProjectId: number | null) {
     selectedProjectId = newProjectId;
     
-    // Update URL
     const url = new URL(window.location.href);
     if (selectedProjectId) {
       url.searchParams.set('project', String(selectedProjectId));
     } else {
       url.searchParams.delete('project');
     }
-    window.history.pushState({}, '', url);
+    // Preserve hash when changing project
+    window.history.pushState({}, '', url.toString());
     
-    // Reload status
     loading = true;
     loadStatus();
   }
@@ -73,10 +81,16 @@
     loadStatus();
   }
 
-  // Initial load
+  // Lifecycle
   $effect(() => {
+    // Initial load
     loadProjects();
     loadStatus();
+    handleHashChange();
+
+    // Listen for hash changes
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
   });
   
   let currentProject = $derived(projects.find(p => p.id === selectedProjectId));
@@ -85,19 +99,20 @@
 
 <app-shell>
   <app-header>
-    <logo>Semanthicc</logo>
-    
-    <ProjectSelector 
-      {projects}
-      {selectedProjectId}
-      onProjectChange={handleProjectChange}
-    />
+    <div class="header-left">
+      <logo>Semanthicc</logo>
+      <ProjectSelector 
+        {projects}
+        {selectedProjectId}
+        onProjectChange={handleProjectChange}
+      />
+    </div>
 
     <nav-bar>
-      <button class="tab-btn" class:active={tab === 'overview'} onclick={() => { console.log('tab: overview'); tab = 'overview'; }}>Overview</button>
-      <button class="tab-btn" class:active={tab === 'memories'} onclick={() => { console.log('tab: memories'); tab = 'memories'; }}>Memories</button>
-      <button class="tab-btn" class:active={tab === 'search'} onclick={() => { console.log('tab: search'); tab = 'search'; }}>Search</button>
-      <button class="tab-btn" class:active={tab === 'settings'} onclick={() => { console.log('tab: settings'); tab = 'settings'; }}>Settings</button>
+      <a class="tab-link" class:active={tab === 'overview'} href="#overview">Overview</a>
+      <a class="tab-link" class:active={tab === 'memories'} href="#memories">Memories</a>
+      <a class="tab-link" class:active={tab === 'search'} href="#search">Search</a>
+      <a class="tab-link" class:active={tab === 'settings'} href="#settings">Settings</a>
     </nav-bar>
   </app-header>
 
@@ -140,6 +155,13 @@
     align-items: center;
     margin-bottom: 2rem;
     gap: 1rem;
+    flex-wrap: wrap;
+  }
+
+  .header-left {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
   }
 
   logo {
@@ -153,16 +175,20 @@
     gap: 1rem;
   }
 
-  button.tab-btn {
-    background: none;
-    border: none;
-    cursor: pointer;
+  a.tab-link {
+    text-decoration: none;
+    color: inherit;
     font-size: 1rem;
     padding: 0.5rem 1rem;
     border-radius: 4px;
+    transition: background-color 0.2s;
   }
 
-  button.tab-btn.active {
+  a.tab-link:hover {
+    background: #f5f5f5;
+  }
+
+  a.tab-link.active {
     background: #eee;
     font-weight: bold;
   }

@@ -35,19 +35,19 @@
   select {
     padding: 0.5rem 1rem;
     border-radius: 6px;
-    border: 1px solid #555;
-    background-color: #000;
-    color: #fff;
+    border: 1px solid #ccc;
+    background-color: white;
+    color: #333;
     font-size: 0.875rem;
     cursor: pointer;
   }
 
   option {
-    background-color: #000;
-    color: #fff;
+    background-color: white;
+    color: #333;
   }
 
   select:hover {
-    border-color: #777;
+    border-color: #999;
   }
 </style>
