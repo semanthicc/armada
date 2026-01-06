@@ -1,6 +1,7 @@
 <script lang="ts">
 	import '../app.css';
 	import favicon from '$lib/assets/favicon.svg';
+	import { allPlugins } from '$lib/plugins/registry';
 
 	let { children } = $props();
 </script>
@@ -15,8 +16,9 @@
 		<div class="flex items-center gap-6">
 			<a href="/" class="text-xl font-bold">🏴‍☠️ Armada</a>
 			<div class="flex gap-4">
-				<a href="/compass" class="hover:underline">🧭 Compass</a>
-				<a href="/captain" class="hover:underline text-gray-400">⚓ Captain (coming soon)</a>
+				{#each allPlugins as plugin}
+					<a href="/{plugin.id}" class="hover:underline">{plugin.icon} {plugin.name}</a>
+				{/each}
 			</div>
 		</div>
 	</nav>
