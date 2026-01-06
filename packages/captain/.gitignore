@@ -1,0 +1,7 @@
+.opencode
+.claude
+.vscode
+node_modules
+dist
+
+docs/specs/
